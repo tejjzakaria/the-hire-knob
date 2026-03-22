@@ -6,6 +6,8 @@ import {
   getRoom,
   joinRoom,
   startGame,
+  submitAnswer,
+  revealRound,
   type Room,
 } from "@/src/lib/gameStore";
 import { scenarios } from "@/src/data/scenarios";
@@ -42,6 +44,23 @@ function toClientScenario(
     explanation: scenario.explanation,
     options: scenario.options.map((o) => ({ label: o.label })),
   };
+}
+
+function correctIndexFor(scenario: (typeof scenarios)[number]): number {
+  return scenario.options.findIndex((o) => o.isCorrect);
+}
+
+async function triggerReveal(roomCode: string, room: Room) {
+  const scenario = roomScenario(room);
+  const ci = correctIndexFor(scenario);
+  const updated = revealRound(roomCode, ci, scenario.id);
+  if (!updated) return;
+  await pusherServer.trigger(`game-${roomCode}`, "round-reveal", {
+    answers: updated.answers,
+    correctIndex: ci,
+    scores: updated.scores,
+    players: updated.players,
+  });
 }
 
 function sanitize(room: Room) {
@@ -109,6 +128,38 @@ export async function POST(request: NextRequest) {
         result.roundStartTime = room.roundStartTime;
       }
       return NextResponse.json(result);
+    }
+
+    case "select-answer": {
+      const { roomCode, playerId, answerIndex } = body as {
+        roomCode: string;
+        playerId: string;
+        answerIndex: number;
+      };
+      const room = submitAnswer(roomCode, playerId, answerIndex);
+      if (!room) {
+        return NextResponse.json({ error: "Invalid state" }, { status: 400 });
+      }
+      await pusherServer.trigger(`game-${roomCode}`, "answer-received", {
+        playerId,
+      });
+      const allAnswered = room.players.every(
+        (p) => room.answers[p.id] !== undefined
+      );
+      if (allAnswered) {
+        await triggerReveal(roomCode, room);
+      }
+      return NextResponse.json({ ok: true });
+    }
+
+    case "timer-expired": {
+      const { roomCode } = body as { roomCode: string };
+      const room = getRoom(roomCode);
+      if (!room || room.revealed) {
+        return NextResponse.json({ ok: true });
+      }
+      await triggerReveal(roomCode, room);
+      return NextResponse.json({ ok: true });
     }
 
     case "start-game": {
