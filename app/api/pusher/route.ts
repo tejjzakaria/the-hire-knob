@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import pusherServer from "@/src/lib/pusherServer";
-import { saveResult } from "@/src/lib/results";
 import {
   generateCode,
   createRoom,
@@ -12,7 +11,10 @@ import {
   advanceRound,
   type Room,
 } from "@/src/lib/gameStore";
+import { saveResult } from "@/src/lib/results";
 import { scenarios } from "@/src/data/scenarios";
+
+// ------------ types ------------
 
 type ScenarioForClient = {
   id: number;
@@ -27,10 +29,14 @@ type ScenarioForClient = {
   options: { label: string }[];
 };
 
+// ------------ helpers ------------
+
+// ------------ looks up the scenario for the room's current round using the seeded order ------------
 function roomScenario(room: Room) {
   return scenarios[room.scenarioOrder[room.currentRound]];
 }
 
+// ------------ strips iscorrect from options so clients cannot see the answer pre-reveal ------------
 function toClientScenario(
   scenario: (typeof scenarios)[number]
 ): ScenarioForClient {
@@ -52,19 +58,6 @@ function correctIndexFor(scenario: (typeof scenarios)[number]): number {
   return scenario.options.findIndex((o) => o.isCorrect);
 }
 
-async function triggerReveal(roomCode: string, room: Room) {
-  const scenario = roomScenario(room);
-  const ci = correctIndexFor(scenario);
-  const updated = revealRound(roomCode, ci, scenario.id);
-  if (!updated) return;
-  await pusherServer.trigger(`game-${roomCode}`, "round-reveal", {
-    answers: updated.answers,
-    correctIndex: ci,
-    scores: updated.scores,
-    players: updated.players,
-  });
-}
-
 function sanitize(room: Room) {
   return {
     code: room.code,
@@ -77,6 +70,21 @@ function sanitize(room: Room) {
     answeredPlayerIds: Object.keys(room.answers),
   };
 }
+
+async function triggerReveal(roomCode: string, room: Room) {
+  const scenario = roomScenario(room);
+  const ci = correctIndexFor(scenario);
+  const updated = revealRound(roomCode, ci, scenario.id);
+  if (!updated) return; // ------------ already revealed, race condition handled ------------
+  await pusherServer.trigger(`game-${roomCode}`, "round-reveal", {
+    answers: updated.answers,
+    correctIndex: ci,
+    scores: updated.scores,
+    players: updated.players,
+  });
+}
+
+// ------------ route handler ------------
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
@@ -132,6 +140,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(result);
     }
 
+    case "start-game": {
+      const { roomCode } = body as { roomCode: string };
+      const room = startGame(roomCode);
+      if (!room) {
+        return NextResponse.json({ error: "Cannot start game" }, { status: 400 });
+      }
+      await pusherServer.trigger(`game-${roomCode}`, "round-start", {
+        round: 0,
+        totalRounds: scenarios.length,
+        scenario: toClientScenario(roomScenario(room)),
+        roundStartTime: room.roundStartTime,
+      });
+      return NextResponse.json({ ok: true });
+    }
+
     case "select-answer": {
       const { roomCode, playerId, answerIndex } = body as {
         roomCode: string;
@@ -142,9 +165,11 @@ export async function POST(request: NextRequest) {
       if (!room) {
         return NextResponse.json({ error: "Invalid state" }, { status: 400 });
       }
+      // ------------ notify subscribers that this player locked in (without revealing their pick) ------------
       await pusherServer.trigger(`game-${roomCode}`, "answer-received", {
         playerId,
       });
+      // ------------ auto-reveal once both players have answered ------------
       const allAnswered = room.players.every(
         (p) => room.answers[p.id] !== undefined
       );
@@ -164,21 +189,6 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    case "start-game": {
-      const { roomCode } = body as { roomCode: string };
-      const room = startGame(roomCode);
-      if (!room) {
-        return NextResponse.json({ error: "Cannot start game" }, { status: 400 });
-      }
-      await pusherServer.trigger(`game-${roomCode}`, "round-start", {
-        round: 0,
-        totalRounds: scenarios.length,
-        scenario: toClientScenario(roomScenario(room)),
-        roundStartTime: room.roundStartTime,
-      });
-      return NextResponse.json({ ok: true });
-    }
-
     case "next-round": {
       const { roomCode, fromRound } = body as {
         roomCode: string;
@@ -186,14 +196,16 @@ export async function POST(request: NextRequest) {
       };
       const room = advanceRound(roomCode, fromRound);
       if (!room) {
-        return NextResponse.json({ ok: true });
+        return NextResponse.json({ ok: true }); // ------------ already advanced (idempotent) ------------
       }
       if (room.currentRound >= scenarios.length) {
+        // ------------ determine winner (null = draw) ------------
         const sortedScores = Object.entries(room.scores).sort(([, a], [, b]) => b - a);
         const winner =
           sortedScores.length >= 2 && sortedScores[0][1] > sortedScores[1][1]
             ? sortedScores[0][0]
             : null;
+
         await saveResult({
           id: crypto.randomUUID(),
           roomCode,
