@@ -57,6 +57,64 @@ function calculateTimerFromStart(roundStartTime: number): number {
   return Math.max(0, ROUND_SECONDS - elapsed);
 }
 
+let _audioCtx: AudioContext | null = null;
+
+function getAudioCtx(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  if (!_audioCtx) {
+    try {
+      _audioCtx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    } catch { return null; }
+  }
+  return _audioCtx;
+}
+
+function playClick() {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain); gain.connect(ctx.destination);
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(520, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.04);
+  gain.gain.setValueAtTime(0.12, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
+  osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.07);
+}
+
+function playCorrect() {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const notes = [523.25, 659.25, 783.99];
+  notes.forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = "sine";
+    const t = ctx.currentTime + i * 0.11;
+    osc.frequency.setValueAtTime(freq, t);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.14, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    osc.start(t); osc.stop(t + 0.36);
+  });
+}
+
+function playWrong() {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain); gain.connect(ctx.destination);
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(200, ctx.currentTime);
+  osc.frequency.exponentialRampToValueAtTime(90, ctx.currentTime + 0.28);
+  gain.gain.setValueAtTime(0.13, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+  osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.32);
+}
+
 function DifficultyBadge({ d }: { d: ScenarioForClient["difficulty"] }) {
   const styles = {
     easy: "bg-emerald-950 text-emerald-400 border-emerald-800",
@@ -151,6 +209,7 @@ export default function GamePage() {
 
   function handleSelectAnswer(idx: number) {
     if (selectedAnswer !== null) return;
+    playClick();
     setSelectedAnswer(idx);
     selectedAnswerRef.current = idx;
     setPhase("answered");
@@ -193,6 +252,10 @@ export default function GamePage() {
     ch.bind("round-reveal", (data: RevealPayload) => {
       stopTimer(); setRevealData(data); setScores(data.scores); setPlayers(data.players);
       setPhase("revealed"); startNextRoundTimer(currentRoundRef.current);
+      const myId = meRef.current?.id;
+      const myAnswer = myId ? data.answers[myId] : undefined;
+      if (myAnswer === data.correctIndex) playCorrect();
+      else playWrong();
     });
 
     ch.bind("game-over", (data: GameOverPayload) => {
