@@ -18,6 +18,21 @@ export interface Room {
 
 const rooms = new Map<string, Room>();
 
+// deterministic fisher-yates shuffle using an lcg seeded from the room code
+function seededShuffle(indices: number[], seed: string): number[] {
+  const arr = [...indices];
+  let state = 0;
+  for (let i = 0; i < seed.length; i++) {
+    state = (Math.imul(state, 31) + seed.charCodeAt(i)) | 0;
+  }
+  for (let i = arr.length - 1; i > 0; i--) {
+    state = (Math.imul(state, 1664525) + 1013904223) | 0;
+    const j = Math.abs(state) % (i + 1);
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
 export function generateCode(): string {
   let code: string;
   do {
@@ -36,7 +51,10 @@ export function createRoom(
     players: [player],
     status: "lobby",
     currentRound: 0,
-    scenarioOrder: Array.from({ length: scenarioCount }, (_, i) => i),
+    scenarioOrder: seededShuffle(
+      Array.from({ length: scenarioCount }, (_, i) => i),
+      code
+    ),
     scores: { [player.id]: 0 },
     answers: {},
     revealed: false,
