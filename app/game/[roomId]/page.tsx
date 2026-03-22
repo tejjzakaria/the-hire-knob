@@ -41,6 +41,17 @@ interface GameOverPayload {
   players: PlayerInfo[];
 }
 
+interface RoundResult {
+  roundIndex: number;
+  candidateName: string;
+  biasLabel: string;
+  myAnswerIndex: number | null;
+  opponentAnswerIndex: number | null;
+  correctIndex: number;
+  myCorrect: boolean;
+  opponentCorrect: boolean;
+}
+
 type GamePhase =
   | "loading"
   | "waiting"
@@ -159,6 +170,7 @@ export default function GamePage() {
   const [finalData, setFinalData] = useState<GameOverPayload | null>(null);
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [scores, setScores] = useState<Record<string, number>>({});
+  const [roundHistory, setRoundHistory] = useState<RoundResult[]>([]);
   const [guestReady, setGuestReady] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [error, setError] = useState("");
@@ -271,6 +283,24 @@ export default function GamePage() {
       const myAnswer = myId ? data.answers[myId] : undefined;
       if (myAnswer === data.correctIndex) playCorrect();
       else playWrong();
+      // ------------ accumulate round history for breakdown display ------------
+      const sc = scenarioRef.current;
+      if (sc && myId) {
+        const opponentId = data.players.find((p) => p.id !== myId)?.id;
+        setRoundHistory((prev) => [
+          ...prev,
+          {
+            roundIndex: currentRoundRef.current,
+            candidateName: sc.candidateName,
+            biasLabel: sc.options[data.correctIndex]?.label ?? "",
+            myAnswerIndex: data.answers[myId] ?? null,
+            opponentAnswerIndex: opponentId ? (data.answers[opponentId] ?? null) : null,
+            correctIndex: data.correctIndex,
+            myCorrect: data.answers[myId] === data.correctIndex,
+            opponentCorrect: opponentId ? data.answers[opponentId] === data.correctIndex : false,
+          },
+        ]);
+      }
     });
 
     ch.bind("game-over", (data: GameOverPayload) => {
