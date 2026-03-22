@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
 import { getPusherClient } from "@/src/lib/pusher";
 import type { Channel } from "pusher-js";
 
@@ -51,6 +52,20 @@ type GamePhase =
 
 const ROUND_SECONDS = 60;
 const NEXT_ROUND_SECONDS = 5;
+
+const PAGE = {
+  initial: { opacity: 0, y: 28 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -14 },
+  transition: { duration: 0.42, ease: "easeOut" as const },
+};
+
+const SLIDE_UP = {
+  initial: { opacity: 0, y: 20 },
+  animate: { opacity: 1, y: 0 },
+  exit: { opacity: 0, y: -10 },
+  transition: { duration: 0.35, ease: "easeOut" as const },
+};
 
 function calculateTimerFromStart(roundStartTime: number): number {
   const elapsed = Math.floor((Date.now() - roundStartTime) / 1000);
@@ -292,13 +307,13 @@ export default function GamePage() {
   if (phase === "loading") {
     return (
       <div className="min-h-screen bg-[#0f0f0f] p-4 pt-8">
-        <div className="max-w-lg mx-auto animate-pulse">
+        <motion.div className="max-w-lg mx-auto animate-pulse" {...PAGE}>
           <div className="h-4 bg-[#1a1a1a] rounded w-1/3 mb-6" />
           <div className="h-48 bg-[#1a1a1a] rounded-2xl mb-4" />
           <div className="space-y-3">
             {[1, 2, 3, 4].map((i) => <div key={i} className="h-14 bg-[#1a1a1a] rounded-xl" />)}
           </div>
-        </div>
+        </motion.div>
       </div>
     );
   }
@@ -306,7 +321,7 @@ export default function GamePage() {
   if (phase === "waiting") {
     return (
       <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-8 text-center">
+        <motion.div className="w-full max-w-sm bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-8 text-center" {...PAGE}>
           <p className="text-[11px] font-semibold text-zinc-500 tracking-[0.18em] uppercase mb-6">Room code</p>
           <div className="text-5xl font-black text-lime-400 tracking-[0.25em] mb-6">{roomId}</div>
           <button
@@ -319,7 +334,7 @@ export default function GamePage() {
             <span className="w-2 h-2 rounded-full bg-lime-400 animate-pulse" />
             {guestReady ? "Both players ready — starting…" : "Waiting for opponent to join…"}
           </div>
-        </div>
+        </motion.div>
       </div>
     );
   }
@@ -345,7 +360,7 @@ export default function GamePage() {
     const timerColor = timer > 30 ? "text-lime-400" : timer > 10 ? "text-orange-400" : "text-rose-400";
     return (
       <div className="min-h-screen bg-[#0f0f0f] p-4">
-        <div className="max-w-lg mx-auto">
+        <motion.div className="max-w-lg mx-auto" {...SLIDE_UP}>
           {/* header */}
           <div className="flex items-center justify-between mb-4">
             <span className="text-xs text-zinc-500">Round {round + 1}/{totalRounds}</span>
@@ -404,12 +419,17 @@ export default function GamePage() {
             })}
           </div>
 
-          {phase === "answered" && (
-            <p className="mt-4 text-center text-sm text-zinc-500">
-              {opponentAnswered ? "Both answered — revealing…" : "Waiting for opponent…"}
-            </p>
-          )}
-        </div>
+          <AnimatePresence>
+            {phase === "answered" && (
+              <motion.p
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                className="mt-4 text-center text-sm text-zinc-500"
+              >
+                {opponentAnswered ? "Both answered — revealing…" : "Waiting for opponent…"}
+              </motion.p>
+            )}
+          </AnimatePresence>
+        </motion.div>
       </div>
     );
   }
