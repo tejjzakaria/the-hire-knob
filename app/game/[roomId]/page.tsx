@@ -359,17 +359,17 @@ export default function GamePage() {
   if (phase === "playing" || phase === "answered") {
     const timerColor = timer > 30 ? "text-lime-400" : timer > 10 ? "text-orange-400" : "text-rose-400";
     return (
-      <div className="min-h-screen bg-[#0f0f0f] p-4">
+      <div className="min-h-screen bg-[#0f0f0f] p-3 sm:p-4">
         <motion.div className="max-w-lg mx-auto" {...SLIDE_UP}>
           {/* header */}
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-3 sm:mb-4">
             <span className="text-xs text-zinc-500">Round {round + 1}/{totalRounds}</span>
-            <span className={`font-mono font-bold text-lg ${timerColor}`}>{timer}s</span>
+            <span className={`font-mono font-bold text-base sm:text-lg ${timerColor}`}>{timer}s</span>
           </div>
 
           {/* candidate card */}
           {scenario && (
-            <div className="bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-5 mb-4">
+            <div className="bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-4 sm:p-5 mb-3 sm:mb-4">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-10 h-10 rounded-full bg-[#2a2a2a] flex items-center justify-center text-white font-bold text-sm">
                   {scenario.candidateInitials}
@@ -462,9 +462,9 @@ export default function GamePage() {
                 <div key={p.id} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-zinc-600 w-4">{i + 1}.</span>
-                    <span className="text-sm text-white">{p.name}{p.id === myId ? " (you)" : ""}</span>
+                    <span className="text-sm sm:text-base text-white truncate max-w-[160px] sm:max-w-none">{p.name}{p.id === myId ? " (you)" : ""}</span>
                   </div>
-                  <span className="text-xl font-black text-lime-400">{finalData.scores[p.id] ?? 0}</span>
+                  <span className="text-xl sm:text-2xl font-black text-lime-400">{finalData.scores[p.id] ?? 0}</span>
                 </div>
               ))}
             </div>
