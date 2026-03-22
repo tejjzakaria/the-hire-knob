@@ -74,6 +74,7 @@ export default function GamePage() {
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [scores, setScores] = useState<Record<string, number>>({});
   const [guestReady, setGuestReady] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
   const [error, setError] = useState("");
 
   const [timer, setTimer] = useState(ROUND_SECONDS);
@@ -228,10 +229,7 @@ export default function GamePage() {
         setPlayers(room.players ?? []);
         setScores(room.scores ?? {});
         if (room.status === "lobby") {
-          const me = meRef.current;
-          if (me && room.players?.find((p: PlayerInfo) => p.id === me.id)) {
-            if (room.players.length >= 2) setGuestReady(true);
-          }
+          if (room.players?.length >= 2) setGuestReady(true);
           setPhase("waiting");
           if (room.players?.length === 2 && !startedGameRef.current) {
             const isHost = meRef.current?.slot === 1;
@@ -271,24 +269,67 @@ export default function GamePage() {
     );
   }
 
+  // loading skeleton
   if (phase === "loading") {
     return (
-      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center">
-        <p className="text-zinc-500">Loading…</p>
+      <div className="min-h-screen bg-[#0f0f0f] p-4 pt-8">
+        <div className="max-w-lg mx-auto animate-pulse">
+          <div className="h-4 bg-[#1a1a1a] rounded w-1/3 mb-6" />
+          <div className="h-48 bg-[#1a1a1a] rounded-2xl mb-4" />
+          <div className="space-y-3">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-14 bg-[#1a1a1a] rounded-xl" />
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
 
+  // waiting screen
   if (phase === "waiting") {
-    const roomCode = roomId;
     return (
       <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-4">
-        <div className="text-center">
-          <p className="text-zinc-400 mb-2">Room code</p>
-          <p className="text-4xl font-black text-lime-400 tracking-widest">{roomCode}</p>
-          <p className="mt-4 text-zinc-500">
-            {guestReady ? "Both players ready — starting…" : "Waiting for opponent to join…"}
+        <div className="w-full max-w-sm bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-8 text-center">
+          <p className="text-[11px] font-semibold text-zinc-500 tracking-[0.18em] uppercase mb-6">
+            Room code
           </p>
+          <div className="text-5xl font-black text-lime-400 tracking-[0.25em] mb-6">
+            {roomId}
+          </div>
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(roomId).then(() => {
+                setCopiedCode(true);
+                setTimeout(() => setCopiedCode(false), 2000);
+              });
+            }}
+            className="w-full py-2.5 rounded-xl border border-[#2a2a2a] text-zinc-400 hover:text-white hover:border-zinc-600 text-sm font-medium transition-all mb-6"
+          >
+            {copiedCode ? "Copied!" : "Copy code"}
+          </button>
+          <div className="flex items-center justify-center gap-2 text-zinc-500 text-sm">
+            <span className="w-2 h-2 rounded-full bg-lime-400 animate-pulse" />
+            {guestReady ? "Both players ready — starting…" : "Waiting for opponent to join…"}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // instructions screen
+  if (phase === "instructions") {
+    return (
+      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-4">
+        <div className="w-full max-w-sm bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-8">
+          <h2 className="text-2xl font-black text-white mb-6">How to play</h2>
+          <ul className="space-y-4 text-sm text-zinc-400 mb-8">
+            <li>Read the AI hiring decision and candidate profile</li>
+            <li>Pick the bias that best explains the AI&apos;s choice</li>
+            <li>You have 60 seconds per round</li>
+            <li>Score a point for each correct answer</li>
+          </ul>
+          <p className="text-xs text-zinc-600 text-center">Starting first round…</p>
         </div>
       </div>
     );
@@ -296,7 +337,7 @@ export default function GamePage() {
 
   return (
     <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-4">
-      <p className="text-zinc-400">Phase: {phase}</p>
+      <p className="text-zinc-400">Phase: {phase} — round {round + 1}/{totalRounds}</p>
     </div>
   );
 }
