@@ -351,6 +351,53 @@ export default function GamePage() {
     );
   }
 
+  function handlePlayAgain() {
+    localStorage.removeItem("hire-knob-room-code");
+    localStorage.removeItem("hire-knob-player-slot");
+    router.push("/");
+  }
+
+  if (phase === "finished" && finalData) {
+    const myId = meRef.current?.id;
+    const sorted = [...finalData.players].sort((a, b) => (finalData.scores[b.id] ?? 0) - (finalData.scores[a.id] ?? 0));
+    const winner = sorted.length >= 2 && (finalData.scores[sorted[0].id] ?? 0) > (finalData.scores[sorted[1].id] ?? 0) ? sorted[0] : null;
+    const isDraw = !winner;
+    const iWon = winner?.id === myId;
+
+    return (
+      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-4">
+        <div className="w-full max-w-sm">
+          <div className="bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-8 mb-4">
+            <p className="text-[11px] font-semibold text-zinc-500 tracking-[0.18em] uppercase mb-2">Game over</p>
+            <h2 className="text-3xl font-black text-white mb-1">
+              {isDraw ? "Draw!" : iWon ? "You win!" : `${winner?.name} wins!`}
+            </h2>
+            <p className="text-zinc-400 text-sm mb-6">{totalRounds} rounds completed</p>
+
+            <div className="space-y-3">
+              {sorted.map((p, i) => (
+                <div key={p.id} className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-600 w-4">{i + 1}.</span>
+                    <span className="text-sm text-white">{p.name}{p.id === myId ? " (you)" : ""}</span>
+                  </div>
+                  <span className="text-xl font-black text-lime-400">{finalData.scores[p.id] ?? 0}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <button
+            onClick={handlePlayAgain}
+            className="w-full py-3 rounded-xl bg-lime-400 hover:bg-lime-300 active:scale-[0.98] text-black font-bold text-sm transition-all"
+          >
+            Play again
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   if (phase === "revealed" && revealData && scenario) {
     const myId = meRef.current?.id;
     const myAnswer = myId ? revealData.answers[myId] : null;
