@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import pusherServer from "@/src/lib/pusherServer";
+import { saveResult } from "@/src/lib/results";
 import {
   generateCode,
   createRoom,
@@ -193,10 +194,19 @@ export async function POST(request: NextRequest) {
           sortedScores.length >= 2 && sortedScores[0][1] > sortedScores[1][1]
             ? sortedScores[0][0]
             : null;
+        await saveResult({
+          id: crypto.randomUUID(),
+          roomCode,
+          playedAt: new Date().toISOString(),
+          players: room.players,
+          scores: room.scores,
+          winner,
+          rounds: room.roundRecords,
+        });
+
         await pusherServer.trigger(`game-${roomCode}`, "game-over", {
           scores: room.scores,
           players: room.players,
-          winner,
         });
       } else {
         await pusherServer.trigger(`game-${roomCode}`, "round-start", {
