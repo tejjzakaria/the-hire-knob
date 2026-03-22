@@ -8,6 +8,7 @@ import {
   startGame,
   submitAnswer,
   revealRound,
+  advanceRound,
   type Room,
 } from "@/src/lib/gameStore";
 import { scenarios } from "@/src/data/scenarios";
@@ -174,6 +175,37 @@ export async function POST(request: NextRequest) {
         scenario: toClientScenario(roomScenario(room)),
         roundStartTime: room.roundStartTime,
       });
+      return NextResponse.json({ ok: true });
+    }
+
+    case "next-round": {
+      const { roomCode, fromRound } = body as {
+        roomCode: string;
+        fromRound: number;
+      };
+      const room = advanceRound(roomCode, fromRound);
+      if (!room) {
+        return NextResponse.json({ ok: true });
+      }
+      if (room.currentRound >= scenarios.length) {
+        const sortedScores = Object.entries(room.scores).sort(([, a], [, b]) => b - a);
+        const winner =
+          sortedScores.length >= 2 && sortedScores[0][1] > sortedScores[1][1]
+            ? sortedScores[0][0]
+            : null;
+        await pusherServer.trigger(`game-${roomCode}`, "game-over", {
+          scores: room.scores,
+          players: room.players,
+          winner,
+        });
+      } else {
+        await pusherServer.trigger(`game-${roomCode}`, "round-start", {
+          round: room.currentRound,
+          totalRounds: scenarios.length,
+          scenario: toClientScenario(roomScenario(room)),
+          roundStartTime: room.roundStartTime,
+        });
+      }
       return NextResponse.json({ ok: true });
     }
 
