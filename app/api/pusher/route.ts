@@ -5,6 +5,7 @@ import {
   createRoom,
   getRoom,
   joinRoom,
+  startGame,
   type Room,
 } from "@/src/lib/gameStore";
 import { scenarios } from "@/src/data/scenarios";
@@ -108,6 +109,21 @@ export async function POST(request: NextRequest) {
         result.roundStartTime = room.roundStartTime;
       }
       return NextResponse.json(result);
+    }
+
+    case "start-game": {
+      const { roomCode } = body as { roomCode: string };
+      const room = startGame(roomCode);
+      if (!room) {
+        return NextResponse.json({ error: "Cannot start game" }, { status: 400 });
+      }
+      await pusherServer.trigger(`game-${roomCode}`, "round-start", {
+        round: 0,
+        totalRounds: scenarios.length,
+        scenario: toClientScenario(roomScenario(room)),
+        roundStartTime: room.roundStartTime,
+      });
+      return NextResponse.json({ ok: true });
     }
 
     default:
