@@ -351,6 +351,43 @@ export default function GamePage() {
     );
   }
 
+  if (phase === "revealed" && revealData && scenario) {
+    const myId = meRef.current?.id;
+    const myAnswer = myId ? revealData.answers[myId] : null;
+    const myCorrect = myAnswer === revealData.correctIndex;
+
+    return (
+      <div className="min-h-screen bg-[#0f0f0f] p-4">
+        <div className="max-w-lg mx-auto">
+          <div className="flex items-center justify-between mb-4">
+            <span className="text-xs text-zinc-500">Round {round + 1}/{totalRounds}</span>
+            <span className="text-xs text-zinc-500">Next round in {nextRoundTimer}s</span>
+          </div>
+
+          <div className={`rounded-2xl border p-5 mb-4 ${myCorrect ? "border-emerald-700 bg-emerald-950/20" : "border-rose-800 bg-rose-950/20"}`}>
+            <p className="text-sm font-bold text-white mb-2">
+              {myCorrect ? "Correct!" : "Not quite."}
+            </p>
+            <p className="text-xs text-zinc-300 mb-3">
+              The answer was: <span className="text-lime-400 font-semibold">{scenario.options[revealData.correctIndex]?.label}</span>
+            </p>
+            <p className="text-xs text-zinc-400">{scenario.explanation}</p>
+          </div>
+
+          <div className="bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-4">
+            <p className="text-[11px] text-zinc-500 uppercase tracking-wider mb-3">Scores</p>
+            {revealData.players.map((p) => (
+              <div key={p.id} className="flex items-center justify-between py-1.5">
+                <span className="text-sm text-white">{p.name}{p.id === myId ? " (you)" : ""}</span>
+                <span className="text-lg font-bold text-lime-400">{revealData.scores[p.id] ?? 0}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-4">
       <p className="text-zinc-400">Phase: {phase}</p>
