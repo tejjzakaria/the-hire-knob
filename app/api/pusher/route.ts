@@ -95,7 +95,7 @@ export async function POST(request: NextRequest) {
           aiRationale: sc.aiRationale,
           difficulty: sc.difficulty,
           explanation: sc.explanation,
-          options: sc.options.map((o) => ({ label: o.label })),
+          options: sc.options.map((o: { label: string; isCorrect: boolean }) => ({ label: o.label })),
         };
         result.round = room.currentRound;
         result.totalRounds = scenarios.length;
@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
           aiRationale: sc.aiRationale,
           difficulty: sc.difficulty,
           explanation: sc.explanation,
-          options: sc.options.map((o) => ({ label: o.label })),
+          options: sc.options.map((o: { label: string; isCorrect: boolean }) => ({ label: o.label })),
         },
         roundStartTime: room.roundStartTime,
       });
@@ -144,7 +144,7 @@ export async function POST(request: NextRequest) {
       if (allAnswered) {
         // --------- do the reveal -----------
         const scenario = scenarios[room.scenarioOrder[room.currentRound]];
-        const ci = scenario.options.findIndex((o) => o.isCorrect);
+        const ci = scenario.options.findIndex((o: { isCorrect: boolean }) => o.isCorrect);
         const updated = revealRound(roomCode, ci, scenario.id);
         if (updated) {
           await pusherServer.trigger(`game-${roomCode}`, "round-reveal", {
@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
       }
       // --------- do the reveal -----------
       const scenario = scenarios[room.scenarioOrder[room.currentRound]];
-      const ci = scenario.options.findIndex((o) => o.isCorrect);
+      const ci = scenario.options.findIndex((o: { isCorrect: boolean }) => o.isCorrect);
       const updated = revealRound(roomCode, ci, scenario.id);
       if (updated) {
         await pusherServer.trigger(`game-${roomCode}`, "round-reveal", {
@@ -223,7 +223,7 @@ export async function POST(request: NextRequest) {
             aiRationale: sc.aiRationale,
             difficulty: sc.difficulty,
             explanation: sc.explanation,
-            options: sc.options.map((o) => ({ label: o.label })),
+            options: sc.options.map((o: { label: string; isCorrect: boolean }) => ({ label: o.label })),
           },
           roundStartTime: room.roundStartTime,
         });
