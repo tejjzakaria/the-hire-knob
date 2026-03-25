@@ -4,15 +4,6 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 
-function getOrCreatePlayerId(): string {
-  let id = localStorage.getItem("hire-knob-player-id");
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem("hire-knob-player-id", id);
-  }
-  return id;
-}
-
 export default function LobbyPage() {
   const router = useRouter();
   const [playerName, setPlayerName] = useState("");
@@ -31,7 +22,12 @@ export default function LobbyPage() {
     setLoading(true);
     setError("");
     try {
-      const playerId = getOrCreatePlayerId();
+      // --------- get or create player id -----------
+      let playerId = localStorage.getItem("hire-knob-player-id");
+      if (!playerId) {
+        playerId = crypto.randomUUID();
+        localStorage.setItem("hire-knob-player-id", playerId);
+      }
       const res = await fetch("/api/pusher", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -47,6 +43,7 @@ export default function LobbyPage() {
       localStorage.setItem("hire-knob-room-code", data.roomCode);
       router.push(`/game/${data.roomCode}`);
     } catch {
+      // --------- fix later -----------
       setError("Could not create room. Please try again.");
       setLoading(false);
     }
@@ -58,7 +55,12 @@ export default function LobbyPage() {
     setLoading(true);
     setError("");
     try {
-      const playerId = getOrCreatePlayerId();
+      // --------- get or create player id -----------
+      let playerId = localStorage.getItem("hire-knob-player-id");
+      if (!playerId) {
+        playerId = crypto.randomUUID();
+        localStorage.setItem("hire-knob-player-id", playerId);
+      }
       const res = await fetch("/api/pusher", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -80,6 +82,7 @@ export default function LobbyPage() {
       localStorage.setItem("hire-knob-room-code", code);
       router.push(`/game/${code}`);
     } catch {
+      // --------- fix later -----------
       setError("Could not join room. Please try again.");
       setLoading(false);
     }

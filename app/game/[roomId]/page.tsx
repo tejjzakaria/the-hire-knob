@@ -61,9 +61,6 @@ type GamePhase =
   | "revealed"
   | "finished";
 
-const ROUND_SECONDS = 60;
-const NEXT_ROUND_SECONDS = 5;
-
 const PAGE = {
   initial: { opacity: 0, y: 28 },
   animate: { opacity: 1, y: 0 },
@@ -77,11 +74,6 @@ const SLIDE_UP = {
   exit: { opacity: 0, y: -10 },
   transition: { duration: 0.35, ease: "easeOut" as const },
 };
-
-function calculateTimerFromStart(roundStartTime: number): number {
-  const elapsed = Math.floor((Date.now() - roundStartTime) / 1000);
-  return Math.max(0, ROUND_SECONDS - elapsed);
-}
 
 let _audioCtx: AudioContext | null = null;
 
@@ -141,19 +133,6 @@ function playWrong() {
   osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.32);
 }
 
-function DifficultyBadge({ d }: { d: ScenarioForClient["difficulty"] }) {
-  const styles = {
-    easy: "bg-emerald-950 text-emerald-400 border-emerald-800",
-    medium: "bg-amber-950 text-lime-400 border-amber-800",
-    hard: "bg-rose-950 text-rose-400 border-rose-800",
-  };
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold uppercase tracking-wider ${styles[d]}`}>
-      {d}
-    </span>
-  );
-}
-
 export default function GamePage() {
   const { roomId } = useParams<{ roomId: string }>();
   const router = useRouter();
@@ -175,8 +154,8 @@ export default function GamePage() {
   const [copiedCode, setCopiedCode] = useState(false);
   const [error, setError] = useState("");
 
-  const [timer, setTimer] = useState(ROUND_SECONDS);
-  const [nextRoundTimer, setNextRoundTimer] = useState(NEXT_ROUND_SECONDS);
+  const [timer, setTimer] = useState(60);
+  const [nextRoundTimer, setNextRoundTimer] = useState(5);
 
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerExpiredRef = useRef(false);
@@ -192,7 +171,7 @@ export default function GamePage() {
     if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null; }
   }, []);
 
-  const startTimer = useCallback((initialSeconds = ROUND_SECONDS) => {
+  const startTimer = useCallback((initialSeconds = 60) => {
     stopTimer();
     timerExpiredRef.current = false;
     setTimer(initialSeconds);
@@ -218,7 +197,7 @@ export default function GamePage() {
   const startNextRoundTimer = useCallback((fromRound: number) => {
     stopNextRoundTimer();
     nextRoundTriggeredRef.current = false;
-    setNextRoundTimer(NEXT_ROUND_SECONDS);
+    setNextRoundTimer(5);
     nextRoundIntervalRef.current = setInterval(() => {
       setNextRoundTimer((t) => {
         if (t <= 1) {
@@ -269,7 +248,9 @@ export default function GamePage() {
       setSelectedAnswer(null); selectedAnswerRef.current = null;
       setOpponentAnswered(false); setRevealData(null);
       setPhase("playing");
-      startTimer(calculateTimerFromStart(data.roundStartTime));
+      // --------- calculate timer from server start time -----------
+      const elapsed = Math.floor((Date.now() - data.roundStartTime) / 1000);
+      startTimer(Math.max(0, 60 - elapsed));
     });
 
     ch.bind("answer-received", (data: { playerId: string }) => {
@@ -283,7 +264,7 @@ export default function GamePage() {
       const myAnswer = myId ? data.answers[myId] : undefined;
       if (myAnswer === data.correctIndex) playCorrect();
       else playWrong();
-      // ------------ accumulate round history for breakdown display ------------
+      // --------- save round history -----------
       const sc = scenarioRef.current;
       if (sc && myId) {
         const opponentId = data.players.find((p) => p.id !== myId)?.id;
@@ -324,7 +305,11 @@ export default function GamePage() {
         } else if (room.status === "playing" && data.scenario) {
           setRound(data.round ?? 0); currentRoundRef.current = data.round ?? 0;
           setTotalRounds(data.totalRounds ?? 5); setScenario(data.scenario); scenarioRef.current = data.scenario;
-          setPhase("playing"); startTimer(calculateTimerFromStart(data.roundStartTime ?? room.roundStartTime));
+          setPhase("playing");
+          // --------- calculate timer from server start time -----------
+          const startTime = data.roundStartTime ?? room.roundStartTime;
+          const elapsed = Math.floor((Date.now() - startTime) / 1000);
+          startTimer(Math.max(0, 60 - elapsed));
         }
       })
       .catch(() => setError("Connection error"));
@@ -387,6 +372,7 @@ export default function GamePage() {
   }
 
   if (phase === "playing" || phase === "answered") {
+    // --------- timer colour -----------
     const timerColor = timer > 30 ? "text-lime-400" : timer > 10 ? "text-orange-400" : "text-rose-400";
     return (
       <div className="min-h-screen bg-[#0f0f0f] p-3 sm:p-4">
@@ -409,7 +395,16 @@ export default function GamePage() {
                   <p className="text-xs text-zinc-500">{scenario.role}</p>
                 </div>
                 <div className="ml-auto">
-                  <DifficultyBadge d={scenario.difficulty} />
+                  {/* --------- difficulty badge ----------- */}
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-md border text-[10px] font-bold uppercase tracking-wider ${
+                    scenario.difficulty === "easy"
+                      ? "bg-emerald-950 text-emerald-400 border-emerald-800"
+                      : scenario.difficulty === "medium"
+                      ? "bg-amber-950 text-lime-400 border-amber-800"
+                      : "bg-rose-950 text-rose-400 border-rose-800"
+                  }`}>
+                    {scenario.difficulty}
+                  </span>
                 </div>
               </div>
               <div className="space-y-1 text-xs mb-4">
@@ -455,7 +450,7 @@ export default function GamePage() {
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                 className="mt-4 text-center text-sm text-zinc-500"
               >
-                {opponentAnswered ? "Both answered — revealing…" : "Waiting for opponent…"}
+                {opponentAnswered ? "Both answered — revealing…" : "Waiting for opponent."}
               </motion.p>
             )}
           </AnimatePresence>

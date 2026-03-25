@@ -1,6 +1,6 @@
-import type { Scenario } from "@/src/types/game";
-
-export const scenarios: Scenario[] = [
+// --------- scenarios data -----------
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const scenarios: any[] = [
   {
     id: 1,
     candidateName: "Jordan Mills",

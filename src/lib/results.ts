@@ -7,23 +7,29 @@ export interface GameResult {
   playedAt: string;
   players: Player[];
   scores: Record<string, number>;
-  // ------------ player id of the winner, or null for a draw ------------
   winner: string | null;
   rounds: RoundRecord[];
 }
 
+// --------- redis -----------
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL!,
   token: process.env.UPSTASH_REDIS_REST_TOKEN!,
 });
 
-const KEY = "hire-knob:results";
-
 export async function saveResult(result: GameResult): Promise<void> {
-  await redis.lpush(KEY, result);
+  try {
+    await redis.lpush("hire-knob:results", result);
+  } catch {
+    console.log("something went wrong");
+  }
 }
 
 export async function getAllResults(): Promise<GameResult[]> {
-  const items = await redis.lrange<GameResult>(KEY, 0, -1);
-  return items;
+  try {
+    const items = await redis.lrange<GameResult>("hire-knob:results", 0, -1);
+    return items;
+  } catch {
+    return [];
+  }
 }

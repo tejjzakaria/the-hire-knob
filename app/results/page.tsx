@@ -1,78 +1,6 @@
 import { getAllResults, type GameResult } from "@/src/lib/results";
 import { scenarios } from "@/src/data/scenarios";
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function getScenario(id: number) {
-  return scenarios.find((s) => s.id === id) ?? null;
-}
-
-function RoundRow({ round, game }: { round: GameResult["rounds"][number]; game: GameResult }) {
-  const scenario = getScenario(round.scenarioId);
-  if (!scenario) return null;
-  const correctLabel = scenario.options[round.correctIndex]?.label ?? "—";
-
-  return (
-    <div className="py-3 border-b border-[#1e1e1e] last:border-0">
-      <div className="flex items-start justify-between gap-4 mb-2">
-        <div>
-          <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">
-            Round {round.roundIndex + 1}
-          </span>
-          <p className="text-sm font-semibold text-zinc-200 mt-0.5">{scenario.candidateName}</p>
-          <p className="text-xs text-zinc-500">{scenario.role}</p>
-        </div>
-        <span className="text-[10px] font-bold uppercase tracking-widest text-lime-400 bg-lime-400/10 border border-lime-400/20 px-2 py-0.5 rounded shrink-0">
-          {scenario.difficulty}
-        </span>
-      </div>
-      <p className="text-[11px] text-zinc-500 mb-2">
-        <span className="text-zinc-600">Correct: </span>
-        <span className="text-zinc-400">{correctLabel}</span>
-      </p>
-      <div className="flex flex-col gap-1">
-        {game.players.map((player) => {
-          const answerIdx = round.answers[player.id];
-          const answered = answerIdx !== null && answerIdx !== undefined;
-          const correct = answered && answerIdx === round.correctIndex;
-          const label = answered ? scenario.options[answerIdx]?.label : null;
-          return (
-            <div key={player.id} className="flex items-center gap-2">
-              <span
-                className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
-                  correct ? "bg-emerald-700" : answered ? "bg-rose-900" : "bg-[#222]"
-                }`}
-              >
-                {correct ? (
-                  <svg className="w-2.5 h-2.5 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-                  </svg>
-                ) : (
-                  <svg className="w-2.5 h-2.5 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                )}
-              </span>
-              <span className="text-xs text-zinc-500 w-20 shrink-0 truncate">{player.name}</span>
-              <span className={`text-xs truncate ${correct ? "text-emerald-400" : answered ? "text-zinc-500" : "text-zinc-700 italic"}`}>
-                {label ?? "Timed out"}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function GameCard({ game }: { game: GameResult }) {
   const p1 = game.players.find((p) => p.slot === 1);
   const p2 = game.players.find((p) => p.slot === 2);
@@ -81,6 +9,15 @@ function GameCard({ game }: { game: GameResult }) {
   const totalRounds = game.rounds.length;
   const winner = game.players.find((p) => p.id === game.winner);
   const isDraw = game.winner === null;
+
+  // --------- format the date -----------
+  const dateStr = new Date(game.playedAt).toLocaleString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 
   return (
     <div className="bg-[#111] border border-[#1e1e1e] rounded-2xl overflow-hidden">
@@ -91,7 +28,7 @@ function GameCard({ game }: { game: GameResult }) {
             <span className="font-mono text-xs font-bold text-zinc-600 bg-[#1a1a1a] border border-[#2a2a2a] px-2 py-0.5 rounded">
               #{game.roomCode}
             </span>
-            <span className="text-xs text-zinc-600">{formatDate(game.playedAt)}</span>
+            <span className="text-xs text-zinc-600">{dateStr}</span>
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm font-bold text-white">
@@ -144,9 +81,64 @@ function GameCard({ game }: { game: GameResult }) {
         {game.rounds.length === 0 ? (
           <p className="text-xs text-zinc-700 py-4 italic">No round data recorded.</p>
         ) : (
-          game.rounds.map((round) => (
-            <RoundRow key={round.roundIndex} round={round} game={game} />
-          ))
+          game.rounds.map((round) => {
+            // --------- look up the scenario -----------
+            const scenario = scenarios.find((s) => s.id === round.scenarioId) ?? null;
+            if (!scenario) return null;
+            const correctLabel = scenario.options[round.correctIndex]?.label ?? "—";
+
+            return (
+              <div key={round.roundIndex} className="py-3 border-b border-[#1e1e1e] last:border-0">
+                <div className="flex items-start justify-between gap-4 mb-2">
+                  <div>
+                    <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">
+                      Round {round.roundIndex + 1}
+                    </span>
+                    <p className="text-sm font-semibold text-zinc-200 mt-0.5">{scenario.candidateName}</p>
+                    <p className="text-xs text-zinc-500">{scenario.role}</p>
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-lime-400 bg-lime-400/10 border border-lime-400/20 px-2 py-0.5 rounded shrink-0">
+                    {scenario.difficulty}
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-500 mb-2">
+                  <span className="text-zinc-600">Correct: </span>
+                  <span className="text-zinc-400">{correctLabel}</span>
+                </p>
+                <div className="flex flex-col gap-1">
+                  {game.players.map((player) => {
+                    const answerIdx = round.answers[player.id];
+                    const answered = answerIdx !== null && answerIdx !== undefined;
+                    const correct = answered && answerIdx === round.correctIndex;
+                    const label = answered ? scenario.options[answerIdx]?.label : null;
+                    return (
+                      <div key={player.id} className="flex items-center gap-2">
+                        <span
+                          className={`w-4 h-4 rounded-full flex items-center justify-center shrink-0 ${
+                            correct ? "bg-emerald-700" : answered ? "bg-rose-900" : "bg-[#222]"
+                          }`}
+                        >
+                          {correct ? (
+                            <svg className="w-2.5 h-2.5 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                            </svg>
+                          ) : (
+                            <svg className="w-2.5 h-2.5 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          )}
+                        </span>
+                        <span className="text-xs text-zinc-500 w-20 shrink-0 truncate">{player.name}</span>
+                        <span className={`text-xs truncate ${correct ? "text-emerald-400" : answered ? "text-zinc-500" : "text-zinc-700 italic"}`}>
+                          {label ?? "Timed out"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
     </div>
@@ -154,6 +146,7 @@ function GameCard({ game }: { game: GameResult }) {
 }
 
 export default async function ResultsPage() {
+  // --------- get all results -----------
   const results = await getAllResults();
 
   return (
