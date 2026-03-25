@@ -197,7 +197,7 @@ export default function GamePage() {
   const startNextRoundTimer = useCallback((fromRound: number) => {
     stopNextRoundTimer();
     nextRoundTriggeredRef.current = false;
-    setNextRoundTimer(5);
+    setNextRoundTimer(30);
     nextRoundIntervalRef.current = setInterval(() => {
       setNextRoundTimer((t) => {
         if (t <= 1) {

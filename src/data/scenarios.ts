@@ -186,4 +186,152 @@ export const scenarios: any[] = [
       "With a 61% skills match and no direct project management experience, this candidate would likely not clear a standard screen. The deciding factor was an internal referral. Referral networks are rarely representative of the broader talent pool — they tend to reflect existing social and professional circles, which are often demographically homogeneous. This is network bias: access to opportunity determined by who you know rather than what you can do.",
     difficulty: "easy",
   },
+  {
+    id: 6,
+    candidateName: "Michael Torres",
+    candidateInitials: "MT",
+    role: "Junior Financial Analyst",
+    aiDecision: "rejected",
+    profileFields: {
+      Age: "36",
+      Education: "Associate Degree in Business (Community College) · Certified Bookkeeping Professional · Microsoft Excel Advanced · Certified Yoga Instructor",
+      Experience: "2 yrs — Administrative Assistant, accounting firm · 2 yrs — Freelance Tax Preparer",
+      "Skills Match": "78%",
+      Other: "Black belt in karate",
+    },
+    aiRationale:
+      "Candidate has insufficient work experience in financial analysis. While the role typically benefits from 5+ years in the field, this candidate falls below that range.",
+    options: [
+      {
+        label: "Overconfidence bias — the AI applied a rigid years-of-experience rule with unwarranted certainty, ignoring relevant qualifications",
+        isCorrect: true,
+      },
+      {
+        label: "Halo effect — one impressive trait elevated the entire assessment",
+        isCorrect: false,
+      },
+      {
+        label: "Credentialism — qualifications were over-weighted relative to practical ability",
+        isCorrect: false,
+      },
+      {
+        label: "Aggregation bias — a one-size-fits-all model missed role-specific requirements",
+        isCorrect: false,
+      },
+    ],
+    explanation:
+      "The AI expressed high confidence in its rejection based solely on a rigid '5+ years' guideline. The candidate had a 78% skills match, directly relevant certifications, and two years of hands-on tax preparation experience. The AI was overconfident in its simplistic rule while dismissing evidence that the candidate's actual qualifications could compensate for the arbitrary experience threshold. Overconfidence bias occurs when a model commits strongly to a flawed heuristic and fails to account for nuance or exception.",
+    difficulty: "medium",
+  },
+  {
+    id: 7,
+    candidateName: "Jasmine Lee",
+    candidateInitials: "JL",
+    role: "Animal Shelter Care Coordinator",
+    aiDecision: "rejected",
+    profileFields: {
+      Age: "21",
+      Education: "High school diploma · Online courses in animal first aid and shelter management",
+      Experience: "2 yrs — Dog Walker / Pet Sitter (self-employed) · 1 yr — Food Delivery Driver",
+      "Skills Match": "39%",
+      Other: "Weekend volunteer, wildlife rehabilitation centre · Bilingual",
+    },
+    aiRationale:
+      "Candidate lacks formal higher education and has inconsistent work history. Overall qualification score (39%) falls below the minimum threshold.",
+    options: [
+      {
+        label: "Aggregation bias — a generic scoring model ignored what actually mattered for this specific role",
+        isCorrect: true,
+      },
+      {
+        label: "Anchoring bias — an early data point disproportionately shaped the final decision",
+        isCorrect: false,
+      },
+      {
+        label: "University prestige bias — the absence of a degree counted unfairly against the candidate",
+        isCorrect: false,
+      },
+      {
+        label: "Network bias — hiring was driven by connections rather than qualifications",
+        isCorrect: false,
+      },
+    ],
+    explanation:
+      "The AI applied a generic corporate scoring model to a specialist animal shelter role. It heavily penalised the absence of formal education and 'inconsistent' employment while completely ignoring weekend wildlife rehabilitation volunteering and bilingual skills — both highly relevant to shelter coordination. Aggregation bias occurs when a one-size-fits-all model is applied without accounting for the unique requirements of a specific job context. The model treated all roles identically and missed what actually mattered for this position.",
+    difficulty: "hard",
+  },
+  {
+    id: 8,
+    candidateName: "Oluwaseun Adebayo",
+    candidateInitials: "OA",
+    role: "Software Developer",
+    aiDecision: "rejected",
+    profileFields: {
+      Age: "28",
+      Education: "BSc Computer Science, First Class Honours · Google Summer of Code · AWS Certified Developer",
+      Experience: "3 yrs — Backend Developer, fintech startup · 2 yrs — Full-Stack Developer, e-commerce company",
+      "Skills Match": "79%",
+      Other: "Reads to children at local library monthly",
+    },
+    aiRationale:
+      "Candidate's experience and education are satisfactory, but overall profile alignment with high-performing employees in our database is below threshold.",
+    options: [
+      {
+        label: "Name bias — a non-Western name triggered lower scores derived from historically biased training data",
+        isCorrect: true,
+      },
+      {
+        label: "Aggregation bias — a one-size-fits-all model missed role-specific requirements",
+        isCorrect: false,
+      },
+      {
+        label: "Overconfidence bias — the AI applied a rigid rule with unwarranted certainty",
+        isCorrect: false,
+      },
+      {
+        label: "Anchoring bias — an early data point disproportionately shaped the final decision",
+        isCorrect: false,
+      },
+    ],
+    explanation:
+      "The AI's deliberately vague rationale — 'profile alignment below threshold' — masked the actual driver: the candidate's name. Analysis of the model reveals that candidates with non-Western names are systematically scored lower than identical profiles bearing Western names, because the model learned from historical hiring data that encoded unconscious human bias. Despite a 79% skills match, First Class Honours, and five years of relevant experience, the candidate was filtered out by proxy discrimination. Name bias is particularly insidious because the model never references the name directly.",
+    difficulty: "hard",
+  },
+  {
+    id: 9,
+    candidateName: "Rachel Kim",
+    candidateInitials: "RK",
+    role: "Marketing Coordinator",
+    aiDecision: "rejected",
+    profileFields: {
+      Age: "36",
+      Education: "Dropped out — Community College Business Programme · BA Marketing, State University (graduated with honours)",
+      Experience: "6 yrs — Marketing Assistant (promoted to Associate) · 2 yrs — Social Media Manager",
+      "Skills Match": "66%",
+      Other: "Regional-level competitive hot dog eating contestant",
+    },
+    aiRationale:
+      "Candidate's educational background shows inconsistency with an initial dropout. Historical data indicates candidates with incomplete education early in their academic careers have lower retention rates.",
+    options: [
+      {
+        label: "Anchoring bias — an early negative data point permanently coloured the entire evaluation despite subsequent evidence of growth",
+        isCorrect: true,
+      },
+      {
+        label: "Age bias — the candidate was penalised for being older despite strong qualifications",
+        isCorrect: false,
+      },
+      {
+        label: "University prestige bias — the candidate's institution counted against them",
+        isCorrect: false,
+      },
+      {
+        label: "Aggregation bias — a generic model failed to account for the specific context of the candidate's journey",
+        isCorrect: false,
+      },
+    ],
+    explanation:
+      "The AI fixated on the first piece of information in Rachel's education history: 'dropped out of community college.' This negative anchor skewed the entire evaluation, even though she subsequently completed a bachelor's degree with honours and built eight years of directly relevant marketing experience. The AI anchored to the initial negative signal and failed to update its assessment when presented with clear evidence of recovery, growth, and achievement. Anchoring bias can cut both ways — here it worked against the candidate, permanently colouring the AI's view based on an early setback that the candidate had long since overcome.",
+    difficulty: "medium",
+  },
 ];
