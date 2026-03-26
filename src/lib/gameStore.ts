@@ -272,6 +272,14 @@ export async function advanceRound(code: string, fromRound: number): Promise<Roo
   return room;
 }
 
+export async function finishGame(code: string): Promise<Room | null> {
+  const room = await loadRoom(code);
+  if (!room) return null;
+  room.status = "finished";
+  await persistRoom(room);
+  return room;
+}
+
 export async function requestSkip(
   code: string,
   playerId: string

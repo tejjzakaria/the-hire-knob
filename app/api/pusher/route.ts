@@ -13,6 +13,7 @@ import {
   requestRematch,
   requestReady,
   updateHeartbeat,
+  finishGame,
 } from "@/src/lib/gameStore";
 import { saveResult } from "@/src/lib/results";
 import { scenarios } from "@/src/data/scenarios";
@@ -180,6 +181,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ ok: true });
       }
       if (room.currentRound >= TOTAL_ROUNDS) {
+        await finishGame(roomCode);
         const sortedScores = Object.entries(room.scores).sort(([, a], [, b]) => b - a);
         const winner =
           sortedScores.length >= 2 && sortedScores[0][1] > sortedScores[1][1]
@@ -244,6 +246,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ ok: true });
         }
         if (room.currentRound >= TOTAL_ROUNDS) {
+          await finishGame(roomCode);
           const sortedScores = Object.entries(room.scores).sort(([, a], [, b]) => b - a);
           const winner =
             sortedScores.length >= 2 && sortedScores[0][1] > sortedScores[1][1]
