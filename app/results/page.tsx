@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getAllResults, type GameResult } from "@/src/lib/results";
 import { scenarios } from "@/src/data/scenarios";
 
@@ -154,6 +155,15 @@ export default async function ResultsPage() {
       <div className="max-w-2xl mx-auto px-4 py-10">
         {/* Header */}
         <div className="mb-8">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-500 hover:text-lime-400 transition-colors mb-4"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+            </svg>
+            Back to lobby
+          </Link>
           <span className="text-[11px] font-semibold tracking-[0.18em] uppercase text-lime-400">
             Admin
           </span>

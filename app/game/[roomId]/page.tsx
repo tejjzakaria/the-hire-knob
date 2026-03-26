@@ -500,6 +500,65 @@ export default function GamePage() {
     };
   }, [phase, roomId, players, scores, stopTimer, stopNextRoundTimer]);
 
+  // recovery poll: if both parties agreed but no Pusher event arrived, sync with server
+  useEffect(() => {
+    const bothSkipped = skipRequested && opponentWantsSkip && phase === "revealed";
+    const bothReady = readyRequested && opponentReady && phase === "instructions";
+    const bothRematch = rematchRequested && opponentWantsRematch && phase === "finished";
+    if (!bothSkipped && !bothReady && !bothRematch) return;
+
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch("/api/pusher", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get-room", roomCode: roomId }),
+        });
+        const data = await res.json();
+        if (data.error) return;
+        const room = data.room;
+
+        // Server moved to a new playing round — catch up
+        if (room.status === "playing" && data.scenario) {
+          const serverRound = data.round ?? 0;
+          const isNewRound = bothSkipped && serverRound !== currentRoundRef.current;
+          const isGameStart = bothReady;
+          const isRematchReady = bothRematch;
+          if (isNewRound || isGameStart || isRematchReady) {
+            stopNextRoundTimer();
+            setRound(serverRound); currentRoundRef.current = serverRound;
+            setTotalRounds(data.totalRounds ?? 5);
+            setScenario(data.scenario); scenarioRef.current = data.scenario;
+            setSelectedAnswer(null); selectedAnswerRef.current = null;
+            setOpponentAnswered(false); setRevealData(null);
+            setSkipRequested(false); setOpponentWantsSkip(false);
+            setReadyRequested(false); setOpponentReady(false);
+            setRematchRequested(false); setOpponentWantsRematch(false);
+            if (isRematchReady) {
+              setScores(room.scores ?? {}); setPlayers(room.players ?? []);
+              setRoundHistory([]);
+              setFinalData(null); setDisconnectWin(false);
+              disconnectStartRef.current = null;
+            }
+            roundStartTimeRef.current = data.roundStartTime ?? room.roundStartTime;
+            setCountdownValue(3);
+            setPhase("countdown");
+          }
+        }
+
+        // Server finished the game while we were on revealed
+        if (room.status === "finished" && bothSkipped) {
+          stopNextRoundTimer();
+          setFinalData({ scores: room.scores, players: room.players });
+          setScores(room.scores); setPlayers(room.players);
+          setPhase("finished");
+        }
+      } catch { /* ignore */ }
+    }, 2000);
+
+    return () => clearInterval(poll);
+  }, [skipRequested, opponentWantsSkip, readyRequested, opponentReady,
+      rematchRequested, opponentWantsRematch, phase, roomId, stopNextRoundTimer]);
+
   // disconnect banner
   const disconnectElapsed = disconnectStartRef.current ? Math.floor((Date.now() - disconnectStartRef.current) / 1000) : 0;
   const disconnectRemaining = Math.max(0, 40 - disconnectElapsed);
