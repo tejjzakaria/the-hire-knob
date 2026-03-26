@@ -1,3 +1,5 @@
+import { Redis } from "@upstash/redis";
+
 export interface Player {
   id: string;
   name: string;
@@ -28,7 +30,96 @@ export interface Room {
   lastHeartbeat: Record<string, number>;
 }
 
+// --------- serialization for Redis -----------
+interface RoomJSON {
+  code: string;
+  players: Player[];
+  status: "lobby" | "playing" | "finished";
+  currentRound: number;
+  scenarioOrder: number[];
+  scores: Record<string, number>;
+  answers: Record<string, number | null>;
+  revealed: boolean;
+  roundStartTime: number;
+  roundRecords: RoundRecord[];
+  readyVotes: string[];
+  rematchVotes: string[];
+  skipVotes: string[];
+  lastHeartbeat: Record<string, number>;
+}
+
+function toJSON(room: Room): RoomJSON {
+  return {
+    ...room,
+    readyVotes: Array.from(room.readyVotes),
+    rematchVotes: Array.from(room.rematchVotes),
+    skipVotes: Array.from(room.skipVotes),
+  };
+}
+
+function fromJSON(data: RoomJSON): Room {
+  return {
+    ...data,
+    readyVotes: new Set(data.readyVotes),
+    rematchVotes: new Set(data.rematchVotes),
+    skipVotes: new Set(data.skipVotes),
+  };
+}
+
+// --------- Redis client -----------
+let redis: Redis | null = null;
+function getRedis(): Redis | null {
+  if (redis) return redis;
+  try {
+    if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+      redis = new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN,
+      });
+      return redis;
+    }
+  } catch { /* fall through */ }
+  return null;
+}
+
+const ROOM_TTL = 3600; // 1 hour
+function redisKey(code: string) { return `hire-knob:room:${code}`; }
+
+// --------- in-memory cache -----------
 const rooms = new Map<string, Room>();
+
+async function persistRoom(room: Room): Promise<void> {
+  rooms.set(room.code, room);
+  const r = getRedis();
+  if (!r) return;
+  try {
+    await r.set(redisKey(room.code), JSON.stringify(toJSON(room)), { ex: ROOM_TTL });
+  } catch (e) {
+    console.error("[gameStore] Redis persist failed:", e);
+  }
+}
+
+async function loadRoom(code: string): Promise<Room | undefined> {
+  // check in-memory first
+  const cached = rooms.get(code);
+  if (cached) return cached;
+  // fall back to Redis
+  const r = getRedis();
+  if (!r) return undefined;
+  try {
+    const raw = await r.get<string | RoomJSON>(redisKey(code));
+    if (!raw) return undefined;
+    const data: RoomJSON = typeof raw === "string" ? JSON.parse(raw) : raw;
+    const room = fromJSON(data);
+    rooms.set(code, room); // cache locally
+    return room;
+  } catch (e) {
+    console.error("[gameStore] Redis load failed:", e);
+    return undefined;
+  }
+}
+
+// --------- public API (all async now) -----------
 
 export function generateCode(): string {
   let code: string;
@@ -38,12 +129,11 @@ export function generateCode(): string {
   return code;
 }
 
-export function createRoom(
+export async function createRoom(
   code: string,
   player: Player,
   scenarioCount: number
-): Room {
-  // --------- shuffle the scenarios -----------
+): Promise<Room> {
   const arr = Array.from({ length: scenarioCount }, (_, i) => i);
   let state = 0;
   for (let i = 0; i < code.length; i++) {
@@ -71,25 +161,26 @@ export function createRoom(
     skipVotes: new Set(),
     lastHeartbeat: { [player.id]: Date.now() },
   };
-  rooms.set(code, room);
+  await persistRoom(room);
   return room;
 }
 
-export function getRoom(code: string): Room | undefined {
-  return rooms.get(code);
+export async function getRoom(code: string): Promise<Room | undefined> {
+  return loadRoom(code);
 }
 
-export function joinRoom(code: string, player: Player): Room | null {
-  const room = rooms.get(code);
+export async function joinRoom(code: string, player: Player): Promise<Room | null> {
+  const room = await loadRoom(code);
   if (!room || room.players.length >= 2 || room.status !== "lobby") return null;
   room.players.push(player);
   room.scores[player.id] = 0;
   room.lastHeartbeat[player.id] = Date.now();
+  await persistRoom(room);
   return room;
 }
 
-export function startGame(code: string): Room | null {
-  const room = rooms.get(code);
+export async function startGame(code: string): Promise<Room | null> {
+  const room = await loadRoom(code);
   if (!room || room.players.length < 2 || room.status !== "lobby") return null;
   room.status = "playing";
   room.currentRound = 0;
@@ -97,27 +188,29 @@ export function startGame(code: string): Room | null {
   room.revealed = false;
   room.roundStartTime = Date.now();
   room.skipVotes = new Set();
+  await persistRoom(room);
   return room;
 }
 
-export function submitAnswer(
+export async function submitAnswer(
   code: string,
   playerId: string,
   answerIndex: number
-): Room | null {
-  const room = rooms.get(code);
+): Promise<Room | null> {
+  const room = await loadRoom(code);
   if (!room || room.revealed) return null;
   if (room.answers[playerId] !== undefined) return room;
   room.answers[playerId] = answerIndex;
+  await persistRoom(room);
   return room;
 }
 
-export function revealRound(
+export async function revealRound(
   code: string,
   correctIndex: number,
   scenarioId: number
-): Room | null {
-  const room = rooms.get(code);
+): Promise<Room | null> {
+  const room = await loadRoom(code);
   if (!room || room.revealed) return null;
   room.revealed = true;
   for (const player of room.players) {
@@ -131,37 +224,40 @@ export function revealRound(
     correctIndex,
     answers: { ...room.answers },
   });
+  await persistRoom(room);
   return room;
 }
 
-export function advanceRound(code: string, fromRound: number): Room | null {
-  const room = rooms.get(code);
+export async function advanceRound(code: string, fromRound: number): Promise<Room | null> {
+  const room = await loadRoom(code);
   if (!room || room.currentRound !== fromRound) return null;
   room.currentRound++;
   room.answers = {};
   room.revealed = false;
   room.roundStartTime = Date.now();
   room.skipVotes = new Set();
+  await persistRoom(room);
   return room;
 }
 
-export function requestSkip(
+export async function requestSkip(
   code: string,
   playerId: string
-): { room: Room; allReady: boolean } | null {
-  const room = rooms.get(code);
+): Promise<{ room: Room; allReady: boolean } | null> {
+  const room = await loadRoom(code);
   if (!room || !room.revealed) return null;
   room.skipVotes.add(playerId);
   const allReady = room.players.every((p) => room.skipVotes.has(p.id));
+  await persistRoom(room);
   return { room, allReady };
 }
 
-export function requestRematch(
+export async function requestRematch(
   code: string,
   playerId: string,
   scenarioCount: number
-): { room: Room; allReady: boolean } | null {
-  const room = rooms.get(code);
+): Promise<{ room: Room; allReady: boolean } | null> {
+  const room = await loadRoom(code);
   if (!room || room.status !== "finished") return null;
   room.rematchVotes.add(playerId);
   const allReady = room.players.every((p) => room.rematchVotes.has(p.id));
@@ -185,14 +281,15 @@ export function requestRematch(
     }
     room.scenarioOrder = arr;
   }
+  await persistRoom(room);
   return { room, allReady };
 }
 
-export function requestReady(
+export async function requestReady(
   code: string,
   playerId: string
-): { room: Room; allReady: boolean } | null {
-  const room = rooms.get(code);
+): Promise<{ room: Room; allReady: boolean } | null> {
+  const room = await loadRoom(code);
   if (!room || room.players.length < 2) return null;
   room.readyVotes.add(playerId);
   const allReady = room.players.every((p) => room.readyVotes.has(p.id));
@@ -207,16 +304,18 @@ export function requestReady(
     room.roundStartTime = Date.now();
     room.readyVotes = new Set();
   }
+  await persistRoom(room);
   return { room, allReady };
 }
 
-export function updateHeartbeat(
+export async function updateHeartbeat(
   code: string,
   playerId: string
-): { opponentLastBeat: number | null } | null {
-  const room = rooms.get(code);
+): Promise<{ opponentLastBeat: number | null } | null> {
+  const room = await loadRoom(code);
   if (!room) return null;
   room.lastHeartbeat[playerId] = Date.now();
+  await persistRoom(room);
   const opponent = room.players.find((p) => p.id !== playerId);
   return {
     opponentLastBeat: opponent ? (room.lastHeartbeat[opponent.id] ?? null) : null,

@@ -19,8 +19,22 @@ import { scenarios } from "@/src/data/scenarios";
 
 const TOTAL_ROUNDS = 5;
 
+function buildScenarioPayload(sc: (typeof scenarios)[number]) {
+  return {
+    id: sc.id,
+    candidateName: sc.candidateName,
+    candidateInitials: sc.candidateInitials,
+    role: sc.role,
+    aiDecision: sc.aiDecision,
+    profileFields: sc.profileFields,
+    aiRationale: sc.aiRationale,
+    difficulty: sc.difficulty,
+    explanation: sc.explanation,
+    options: sc.options.map((o: { label: string; isCorrect: boolean }) => ({ label: o.label })),
+  };
+}
+
 export async function POST(request: NextRequest) {
-  // --------- handle the request -----------
   try {
     const body = await request.json();
     const { action } = body as { action: string };
@@ -28,7 +42,7 @@ export async function POST(request: NextRequest) {
     if (action === "create-room") {
       const { playerId, playerName } = body;
       const code = generateCode();
-      const room = createRoom(code, { id: playerId, name: playerName, slot: 1 }, scenarios.length);
+      const room = await createRoom(code, { id: playerId, name: playerName, slot: 1 }, scenarios.length);
       return NextResponse.json({
         roomCode: code,
         slot: 1,
@@ -47,7 +61,7 @@ export async function POST(request: NextRequest) {
 
     if (action === "join-room") {
       const { roomCode, playerId, playerName } = body;
-      const room = joinRoom(roomCode, { id: playerId, name: playerName, slot: 2 });
+      const room = await joinRoom(roomCode, { id: playerId, name: playerName, slot: 2 });
       if (!room) {
         return NextResponse.json({ error: "Room not found or already full" }, { status: 404 });
       }
@@ -71,11 +85,10 @@ export async function POST(request: NextRequest) {
 
     if (action === "get-room") {
       const { roomCode } = body;
-      const room = getRoom(roomCode);
+      const room = await getRoom(roomCode);
       if (!room) {
         return NextResponse.json({ error: "Room not found" }, { status: 404 });
       }
-      // --------- build room response -----------
       const result: Record<string, unknown> = {
         room: {
           code: room.code,
@@ -89,20 +102,8 @@ export async function POST(request: NextRequest) {
         },
       };
       if (room.status === "playing") {
-        // --------- get scenario for this round -----------
         const sc = scenarios[room.scenarioOrder[room.currentRound]];
-        result.scenario = {
-          id: sc.id,
-          candidateName: sc.candidateName,
-          candidateInitials: sc.candidateInitials,
-          role: sc.role,
-          aiDecision: sc.aiDecision,
-          profileFields: sc.profileFields,
-          aiRationale: sc.aiRationale,
-          difficulty: sc.difficulty,
-          explanation: sc.explanation,
-          options: sc.options.map((o: { label: string; isCorrect: boolean }) => ({ label: o.label })),
-        };
+        result.scenario = buildScenarioPayload(sc);
         result.round = room.currentRound;
         result.totalRounds = TOTAL_ROUNDS;
         result.roundStartTime = room.roundStartTime;
@@ -112,27 +113,15 @@ export async function POST(request: NextRequest) {
 
     if (action === "start-game") {
       const { roomCode } = body;
-      const room = startGame(roomCode);
+      const room = await startGame(roomCode);
       if (!room) {
         return NextResponse.json({ error: "Cannot start game" }, { status: 400 });
       }
-      // --------- send scenario to clients -----------
       const sc = scenarios[room.scenarioOrder[room.currentRound]];
       await pusherServer.trigger(`game-${roomCode}`, "round-start", {
         round: 0,
         totalRounds: TOTAL_ROUNDS,
-        scenario: {
-          id: sc.id,
-          candidateName: sc.candidateName,
-          candidateInitials: sc.candidateInitials,
-          role: sc.role,
-          aiDecision: sc.aiDecision,
-          profileFields: sc.profileFields,
-          aiRationale: sc.aiRationale,
-          difficulty: sc.difficulty,
-          explanation: sc.explanation,
-          options: sc.options.map((o: { label: string; isCorrect: boolean }) => ({ label: o.label })),
-        },
+        scenario: buildScenarioPayload(sc),
         roundStartTime: room.roundStartTime,
       });
       return NextResponse.json({ ok: true });
@@ -140,18 +129,18 @@ export async function POST(request: NextRequest) {
 
     if (action === "select-answer") {
       const { roomCode, playerId, answerIndex } = body;
-      const room = submitAnswer(roomCode, playerId, answerIndex);
+      const room = await submitAnswer(roomCode, playerId, answerIndex);
       if (!room) {
-        return NextResponse.json({ error: "Invalid state" }, { status: 400 });
+        const exists = await getRoom(roomCode);
+        console.error(`[select-answer] Room ${roomCode} not found or already revealed. Room exists: ${!!exists}`);
+        return NextResponse.json({ error: "Room not found or round already revealed. The game may have expired." }, { status: 400 });
       }
       await pusherServer.trigger(`game-${roomCode}`, "answer-received", { playerId });
-      // --------- check if everyone answered -----------
       const allAnswered = room.players.every((p) => room.answers[p.id] !== undefined);
       if (allAnswered) {
-        // --------- do the reveal -----------
         const scenario = scenarios[room.scenarioOrder[room.currentRound]];
         const ci = scenario.options.findIndex((o: { isCorrect: boolean }) => o.isCorrect);
-        const updated = revealRound(roomCode, ci, scenario.id);
+        const updated = await revealRound(roomCode, ci, scenario.id);
         if (updated) {
           await pusherServer.trigger(`game-${roomCode}`, "round-reveal", {
             answers: updated.answers,
@@ -166,14 +155,13 @@ export async function POST(request: NextRequest) {
 
     if (action === "timer-expired") {
       const { roomCode } = body;
-      const room = getRoom(roomCode);
+      const room = await getRoom(roomCode);
       if (!room || room.revealed) {
         return NextResponse.json({ ok: true });
       }
-      // --------- do the reveal -----------
       const scenario = scenarios[room.scenarioOrder[room.currentRound]];
       const ci = scenario.options.findIndex((o: { isCorrect: boolean }) => o.isCorrect);
-      const updated = revealRound(roomCode, ci, scenario.id);
+      const updated = await revealRound(roomCode, ci, scenario.id);
       if (updated) {
         await pusherServer.trigger(`game-${roomCode}`, "round-reveal", {
           answers: updated.answers,
@@ -187,12 +175,11 @@ export async function POST(request: NextRequest) {
 
     if (action === "next-round") {
       const { roomCode, fromRound } = body;
-      const room = advanceRound(roomCode, fromRound);
+      const room = await advanceRound(roomCode, fromRound);
       if (!room) {
         return NextResponse.json({ ok: true });
       }
       if (room.currentRound >= TOTAL_ROUNDS) {
-        // --------- game over -----------
         const sortedScores = Object.entries(room.scores).sort(([, a], [, b]) => b - a);
         const winner =
           sortedScores.length >= 2 && sortedScores[0][1] > sortedScores[1][1]
@@ -214,23 +201,11 @@ export async function POST(request: NextRequest) {
           players: room.players,
         });
       } else {
-        // --------- next round -----------
         const sc = scenarios[room.scenarioOrder[room.currentRound]];
         await pusherServer.trigger(`game-${roomCode}`, "round-start", {
           round: room.currentRound,
           totalRounds: TOTAL_ROUNDS,
-          scenario: {
-            id: sc.id,
-            candidateName: sc.candidateName,
-            candidateInitials: sc.candidateInitials,
-            role: sc.role,
-            aiDecision: sc.aiDecision,
-            profileFields: sc.profileFields,
-            aiRationale: sc.aiRationale,
-            difficulty: sc.difficulty,
-            explanation: sc.explanation,
-            options: sc.options.map((o: { label: string; isCorrect: boolean }) => ({ label: o.label })),
-          },
+          scenario: buildScenarioPayload(sc),
           roundStartTime: room.roundStartTime,
         });
       }
@@ -239,7 +214,7 @@ export async function POST(request: NextRequest) {
 
     if (action === "request-ready") {
       const { roomCode, playerId } = body;
-      const result = requestReady(roomCode, playerId);
+      const result = await requestReady(roomCode, playerId);
       if (!result) {
         return NextResponse.json({ ok: true });
       }
@@ -248,18 +223,7 @@ export async function POST(request: NextRequest) {
         await pusherServer.trigger(`game-${roomCode}`, "round-start", {
           round: result.room.currentRound,
           totalRounds: TOTAL_ROUNDS,
-          scenario: {
-            id: sc.id,
-            candidateName: sc.candidateName,
-            candidateInitials: sc.candidateInitials,
-            role: sc.role,
-            aiDecision: sc.aiDecision,
-            profileFields: sc.profileFields,
-            aiRationale: sc.aiRationale,
-            difficulty: sc.difficulty,
-            explanation: sc.explanation,
-            options: sc.options.map((o: { label: string; isCorrect: boolean }) => ({ label: o.label })),
-          },
+          scenario: buildScenarioPayload(sc),
           roundStartTime: result.room.roundStartTime,
         });
       } else {
@@ -270,12 +234,12 @@ export async function POST(request: NextRequest) {
 
     if (action === "request-skip") {
       const { roomCode, playerId } = body;
-      const result = requestSkip(roomCode, playerId);
+      const result = await requestSkip(roomCode, playerId);
       if (!result) {
         return NextResponse.json({ ok: true });
       }
       if (result.allReady) {
-        const room = advanceRound(roomCode, result.room.currentRound);
+        const room = await advanceRound(roomCode, result.room.currentRound);
         if (!room) {
           return NextResponse.json({ ok: true });
         }
@@ -303,18 +267,7 @@ export async function POST(request: NextRequest) {
           await pusherServer.trigger(`game-${roomCode}`, "round-start", {
             round: room.currentRound,
             totalRounds: TOTAL_ROUNDS,
-            scenario: {
-              id: sc.id,
-              candidateName: sc.candidateName,
-              candidateInitials: sc.candidateInitials,
-              role: sc.role,
-              aiDecision: sc.aiDecision,
-              profileFields: sc.profileFields,
-              aiRationale: sc.aiRationale,
-              difficulty: sc.difficulty,
-              explanation: sc.explanation,
-              options: sc.options.map((o: { label: string; isCorrect: boolean }) => ({ label: o.label })),
-            },
+            scenario: buildScenarioPayload(sc),
             roundStartTime: room.roundStartTime,
           });
         }
@@ -326,7 +279,7 @@ export async function POST(request: NextRequest) {
 
     if (action === "request-rematch") {
       const { roomCode, playerId } = body;
-      const result = requestRematch(roomCode, playerId, scenarios.length);
+      const result = await requestRematch(roomCode, playerId, scenarios.length);
       if (!result) {
         return NextResponse.json({ error: "Cannot rematch" }, { status: 400 });
       }
@@ -344,7 +297,7 @@ export async function POST(request: NextRequest) {
 
     if (action === "heartbeat") {
       const { roomCode, playerId } = body;
-      const result = updateHeartbeat(roomCode, playerId);
+      const result = await updateHeartbeat(roomCode, playerId);
       if (!result) {
         return NextResponse.json({ error: "Room not found" }, { status: 404 });
       }
@@ -352,8 +305,8 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
-  } catch {
-    // --------- something went wrong -----------
+  } catch (e) {
+    console.error("[api/pusher] Error:", e);
     return NextResponse.json({ error: "something went wrong" }, { status: 500 });
   }
 }

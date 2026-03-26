@@ -273,7 +273,19 @@ export default function GamePage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "select-answer", roomCode: roomId, playerId: meRef.current?.id, answerIndex: idx }),
-    }).catch(() => {});
+    })
+      .then((r) => {
+        if (!r.ok) {
+          console.error("select-answer failed:", r.status);
+          setError("Lost connection to game. The room may have expired — try starting a new game.");
+          setPhase("loading");
+        }
+      })
+      .catch(() => {
+        console.error("select-answer network error");
+        setError("Network error. Please check your connection.");
+        setPhase("loading");
+      });
   }
 
   useEffect(() => {
