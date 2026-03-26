@@ -84,6 +84,38 @@ function getRedis(): Redis | null {
 
 const ROOM_TTL = 3600; // 1 hour
 function redisKey(code: string) { return `hire-knob:room:${code}`; }
+function voteKey(type: string, code: string) { return `hire-knob:vote:${type}:${code}`; }
+
+// Atomic vote using Redis SADD + SCARD.
+// Returns true if this vote caused the threshold to be met (and claims the action).
+async function atomicVote(key: string, playerId: string, required: number): Promise<boolean> {
+  const r = getRedis();
+  if (!r) return false; // in-memory fallback handled by caller
+  try {
+    await r.sadd(key, playerId);
+    const count = await r.scard(key);
+    if (count >= required) {
+      // Claim the action: use setnx so only one caller wins the race
+      const claimed = await r.set(`${key}:lock`, "1", { nx: true, ex: 10 });
+      if (claimed) {
+        await r.del(key, `${key}:lock`);
+        return true;
+      }
+    }
+    return false;
+  } catch (e) {
+    console.error("[gameStore] atomicVote failed:", e);
+    return false;
+  }
+}
+
+async function clearVote(key: string): Promise<void> {
+  const r = getRedis();
+  if (!r) return;
+  try {
+    await r.del(key, `${key}:lock`);
+  } catch { /* ignore */ }
+}
 
 // --------- in-memory cache -----------
 const rooms = new Map<string, Room>();
@@ -236,6 +268,7 @@ export async function advanceRound(code: string, fromRound: number): Promise<Roo
   room.revealed = false;
   room.roundStartTime = Date.now();
   room.skipVotes = new Set();
+  await clearVote(voteKey("skip", code));
   await persistRoom(room);
   return room;
 }
@@ -247,7 +280,14 @@ export async function requestSkip(
   const room = await loadRoom(code);
   if (!room || !room.revealed) return null;
   room.skipVotes.add(playerId);
-  const allReady = room.players.every((p) => room.skipVotes.has(p.id));
+  // Use atomic Redis voting to avoid race conditions across instances
+  const r = getRedis();
+  let allReady: boolean;
+  if (r) {
+    allReady = await atomicVote(voteKey("skip", code), playerId, room.players.length);
+  } else {
+    allReady = room.players.every((p) => room.skipVotes.has(p.id));
+  }
   await persistRoom(room);
   return { room, allReady };
 }
@@ -260,7 +300,13 @@ export async function requestRematch(
   const room = await loadRoom(code);
   if (!room || room.status !== "finished") return null;
   room.rematchVotes.add(playerId);
-  const allReady = room.players.every((p) => room.rematchVotes.has(p.id));
+  const r = getRedis();
+  let allReady: boolean;
+  if (r) {
+    allReady = await atomicVote(voteKey("rematch", code), playerId, room.players.length);
+  } else {
+    allReady = room.players.every((p) => room.rematchVotes.has(p.id));
+  }
   if (allReady) {
     room.status = "playing";
     room.currentRound = 0;
@@ -280,6 +326,8 @@ export async function requestRematch(
       [arr[i], arr[j]] = [arr[j], arr[i]];
     }
     room.scenarioOrder = arr;
+    await clearVote(voteKey("skip", code));
+    await clearVote(voteKey("ready", code));
   }
   await persistRoom(room);
   return { room, allReady };
@@ -292,7 +340,13 @@ export async function requestReady(
   const room = await loadRoom(code);
   if (!room || room.players.length < 2) return null;
   room.readyVotes.add(playerId);
-  const allReady = room.players.every((p) => room.readyVotes.has(p.id));
+  const r = getRedis();
+  let allReady: boolean;
+  if (r) {
+    allReady = await atomicVote(voteKey("ready", code), playerId, room.players.length);
+  } else {
+    allReady = room.players.every((p) => room.readyVotes.has(p.id));
+  }
   if (allReady) {
     if (room.status === "lobby") {
       room.status = "playing";
@@ -300,6 +354,7 @@ export async function requestReady(
       room.answers = {};
       room.revealed = false;
       room.skipVotes = new Set();
+      await clearVote(voteKey("skip", code));
     }
     room.roundStartTime = Date.now();
     room.readyVotes = new Set();
