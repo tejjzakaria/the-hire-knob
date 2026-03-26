@@ -11,6 +11,7 @@ import {
   advanceRound,
   requestSkip,
   requestRematch,
+  requestReady,
   updateHeartbeat,
 } from "@/src/lib/gameStore";
 import { saveResult } from "@/src/lib/results";
@@ -236,6 +237,37 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
+    if (action === "request-ready") {
+      const { roomCode, playerId } = body;
+      const result = requestReady(roomCode, playerId);
+      if (!result) {
+        return NextResponse.json({ ok: true });
+      }
+      if (result.allReady) {
+        const sc = scenarios[result.room.scenarioOrder[result.room.currentRound]];
+        await pusherServer.trigger(`game-${roomCode}`, "round-start", {
+          round: result.room.currentRound,
+          totalRounds: TOTAL_ROUNDS,
+          scenario: {
+            id: sc.id,
+            candidateName: sc.candidateName,
+            candidateInitials: sc.candidateInitials,
+            role: sc.role,
+            aiDecision: sc.aiDecision,
+            profileFields: sc.profileFields,
+            aiRationale: sc.aiRationale,
+            difficulty: sc.difficulty,
+            explanation: sc.explanation,
+            options: sc.options.map((o: { label: string; isCorrect: boolean }) => ({ label: o.label })),
+          },
+          roundStartTime: result.room.roundStartTime,
+        });
+      } else {
+        await pusherServer.trigger(`game-${roomCode}`, "ready-requested", { playerId });
+      }
+      return NextResponse.json({ ok: true });
+    }
+
     if (action === "request-skip") {
       const { roomCode, playerId } = body;
       const result = requestSkip(roomCode, playerId);
@@ -299,22 +331,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Cannot rematch" }, { status: 400 });
       }
       if (result.allReady) {
-        const sc = scenarios[result.room.scenarioOrder[0]];
         await pusherServer.trigger(`game-${roomCode}`, "rematch-start", {
-          round: 0,
-          totalRounds: TOTAL_ROUNDS,
-          scenario: {
-            id: sc.id,
-            candidateName: sc.candidateName,
-            candidateInitials: sc.candidateInitials,
-            role: sc.role,
-            aiDecision: sc.aiDecision,
-            profileFields: sc.profileFields,
-            aiRationale: sc.aiRationale,
-            difficulty: sc.difficulty,
-            explanation: sc.explanation,
-            options: sc.options.map((o: { label: string; isCorrect: boolean }) => ({ label: o.label })),
-          },
           roundStartTime: result.room.roundStartTime,
           scores: result.room.scores,
           players: result.room.players,

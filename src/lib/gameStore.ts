@@ -22,6 +22,7 @@ export interface Room {
   revealed: boolean;
   roundStartTime: number;
   roundRecords: RoundRecord[];
+  readyVotes: Set<string>;
   rematchVotes: Set<string>;
   skipVotes: Set<string>;
   lastHeartbeat: Record<string, number>;
@@ -65,6 +66,7 @@ export function createRoom(
     revealed: false,
     roundStartTime: 0,
     roundRecords: [],
+    readyVotes: new Set(),
     rematchVotes: new Set(),
     skipVotes: new Set(),
     lastHeartbeat: { [player.id]: Date.now() },
@@ -172,6 +174,7 @@ export function requestRematch(
     room.roundRecords = [];
     room.rematchVotes = new Set();
     room.skipVotes = new Set();
+    room.readyVotes = new Set();
     for (const player of room.players) {
       room.scores[player.id] = 0;
     }
@@ -181,6 +184,28 @@ export function requestRematch(
       [arr[i], arr[j]] = [arr[j], arr[i]];
     }
     room.scenarioOrder = arr;
+  }
+  return { room, allReady };
+}
+
+export function requestReady(
+  code: string,
+  playerId: string
+): { room: Room; allReady: boolean } | null {
+  const room = rooms.get(code);
+  if (!room || room.players.length < 2) return null;
+  room.readyVotes.add(playerId);
+  const allReady = room.players.every((p) => room.readyVotes.has(p.id));
+  if (allReady) {
+    if (room.status === "lobby") {
+      room.status = "playing";
+      room.currentRound = 0;
+      room.answers = {};
+      room.revealed = false;
+      room.skipVotes = new Set();
+    }
+    room.roundStartTime = Date.now();
+    room.readyVotes = new Set();
   }
   return { room, allReady };
 }

@@ -195,6 +195,10 @@ export default function GamePage() {
   const [rematchRequested, setRematchRequested] = useState(false);
   const [opponentWantsRematch, setOpponentWantsRematch] = useState(false);
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
+  const [readyRequested, setReadyRequested] = useState(false);
+  const [opponentReady, setOpponentReady] = useState(false);
+  const [showQuitConfirm, setShowQuitConfirm] = useState(false);
+  const [disconnectWin, setDisconnectWin] = useState(false);
 
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerExpiredRef = useRef(false);
@@ -208,6 +212,8 @@ export default function GamePage() {
   const roundStartTimeRef = useRef(0);
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const disconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const disconnectStartRef = useRef<number | null>(null);
 
   const stopTimer = useCallback(() => {
     if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null; }
@@ -284,11 +290,7 @@ export default function GamePage() {
     ch.bind("player-joined", (data: { player: PlayerInfo }) => {
       setPlayers((prev) => { if (prev.find((p) => p.id === data.player.id)) return prev; return [...prev, data.player]; });
       setGuestReady(true);
-      // Player 1 triggers start-game when Player 2 joins
-      if (meRef.current?.slot === 1 && !startedGameRef.current) {
-        startedGameRef.current = true;
-        fetch("/api/pusher", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start-game", roomCode: roomId }) }).catch(() => {});
-      }
+      setPhase("instructions");
     });
 
     ch.bind("round-start", (data: { round: number; totalRounds: number; scenario: ScenarioForClient; roundStartTime: number }) => {
@@ -299,12 +301,8 @@ export default function GamePage() {
       setOpponentAnswered(false); setRevealData(null);
       setSkipRequested(false); setOpponentWantsSkip(false);
       roundStartTimeRef.current = data.roundStartTime;
-      if (data.round === 0) {
-        setPhase("instructions");
-      } else {
-        setCountdownValue(3);
-        setPhase("countdown");
-      }
+      setCountdownValue(3);
+      setPhase("countdown");
     });
 
     ch.bind("answer-received", (data: { playerId: string }) => {
@@ -342,6 +340,7 @@ export default function GamePage() {
       stopTimer(); stopNextRoundTimer(); setFinalData(data);
       setScores(data.scores); setPlayers(data.players); setPhase("finished");
       setRematchRequested(false); setOpponentWantsRematch(false);
+      setDisconnectWin(false); disconnectStartRef.current = null;
       // confetti for the winner
       const myId = meRef.current?.id;
       if (myId) {
@@ -355,6 +354,10 @@ export default function GamePage() {
       }
     });
 
+    ch.bind("ready-requested", (data: { playerId: string }) => {
+      if (meRef.current && data.playerId !== meRef.current.id) setOpponentReady(true);
+    });
+
     ch.bind("skip-requested", (data: { playerId: string }) => {
       if (meRef.current && data.playerId !== meRef.current.id) setOpponentWantsSkip(true);
     });
@@ -363,17 +366,18 @@ export default function GamePage() {
       if (meRef.current && data.playerId !== meRef.current.id) setOpponentWantsRematch(true);
     });
 
-    ch.bind("rematch-start", (data: { round: number; totalRounds: number; scenario: ScenarioForClient; roundStartTime: number; scores: Record<string, number>; players: PlayerInfo[] }) => {
-      setRound(data.round); currentRoundRef.current = data.round;
-      setTotalRounds(data.totalRounds); setScenario(data.scenario); scenarioRef.current = data.scenario;
+    ch.bind("rematch-start", (data: { scores: Record<string, number>; players: PlayerInfo[] }) => {
+      setRound(0); currentRoundRef.current = 0;
+      setScenario(null); scenarioRef.current = null;
       setSelectedAnswer(null); selectedAnswerRef.current = null;
       setOpponentAnswered(false); setRevealData(null); setFinalData(null);
       setScores(data.scores); setPlayers(data.players);
       setRoundHistory([]);
       setRematchRequested(false); setOpponentWantsRematch(false);
       setSkipRequested(false); setOpponentWantsSkip(false);
-      startedGameRef.current = true;
-      roundStartTimeRef.current = data.roundStartTime;
+      setReadyRequested(false); setOpponentReady(false);
+      setDisconnectWin(false);
+      disconnectStartRef.current = null;
       setPhase("instructions");
     });
 
@@ -384,11 +388,11 @@ export default function GamePage() {
         const room = data.room;
         setPlayers(room.players ?? []); setScores(room.scores ?? {});
         if (room.status === "lobby") {
-          if (room.players?.length >= 2) setGuestReady(true);
-          setPhase("waiting");
-          if (room.players?.length === 2 && !startedGameRef.current && meRef.current?.slot === 1) {
-            startedGameRef.current = true;
-            fetch("/api/pusher", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start-game", roomCode: roomId }) }).catch(() => {});
+          if (room.players?.length >= 2) {
+            setGuestReady(true);
+            setPhase("instructions");
+          } else {
+            setPhase("waiting");
           }
         } else if (room.status === "playing" && data.scenario) {
           setRound(data.round ?? 0); currentRoundRef.current = data.round ?? 0;
@@ -407,6 +411,7 @@ export default function GamePage() {
       stopTimer(); stopNextRoundTimer();
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
       if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+      if (disconnectTimerRef.current) clearTimeout(disconnectTimerRef.current);
     };
   }, [roomId, router, startTimer, stopTimer, startNextRoundTimer, stopNextRoundTimer]);
 
@@ -444,20 +449,91 @@ export default function GamePage() {
         });
         const data = await res.json();
         if (data.opponentLastBeat !== null && data.opponentLastBeat !== undefined) {
-          setOpponentDisconnected(Date.now() - data.opponentLastBeat > 15000);
+          const stale = Date.now() - data.opponentLastBeat > 15000;
+          setOpponentDisconnected(stale);
+          if (stale) {
+            // start 40s disconnect countdown if not already started
+            if (!disconnectStartRef.current) {
+              disconnectStartRef.current = Date.now();
+            }
+            const elapsed = Date.now() - disconnectStartRef.current;
+            if (elapsed >= 40000 && phase !== "finished" && phase !== "waiting") {
+              // auto-win: opponent disconnected for 40+ seconds
+              stopTimer(); stopNextRoundTimer();
+              const myId = meRef.current?.id;
+              const currentPlayers = players.length > 0 ? players : [];
+              const autoScores: Record<string, number> = {};
+              currentPlayers.forEach((p) => {
+                autoScores[p.id] = p.id === myId ? (scores[p.id] ?? 0) : (scores[p.id] ?? 0);
+              });
+              setFinalData({ scores: autoScores, players: currentPlayers });
+              setScores(autoScores);
+              setDisconnectWin(true);
+              setPhase("finished");
+              playVictory();
+              confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+            }
+          } else {
+            // opponent reconnected, reset disconnect timer
+            disconnectStartRef.current = null;
+            if (disconnectTimerRef.current) { clearTimeout(disconnectTimerRef.current); disconnectTimerRef.current = null; }
+          }
         }
       } catch { /* ignore */ }
     };
     sendHeartbeat();
     heartbeatIntervalRef.current = setInterval(sendHeartbeat, 5000);
-    return () => { if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current); };
-  }, [phase, roomId]);
+    return () => {
+      if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+    };
+  }, [phase, roomId, players, scores, stopTimer, stopNextRoundTimer]);
 
   // disconnect banner
+  const disconnectElapsed = disconnectStartRef.current ? Math.floor((Date.now() - disconnectStartRef.current) / 1000) : 0;
+  const disconnectRemaining = Math.max(0, 40 - disconnectElapsed);
   const disconnectBanner = opponentDisconnected && phase !== "loading" && phase !== "waiting" && phase !== "finished" ? (
     <div className="fixed top-0 left-0 right-0 z-50 bg-amber-900/90 border-b border-amber-700 px-4 py-2 text-center">
-      <p className="text-amber-200 text-sm font-medium">Opponent appears to have disconnected</p>
+      <p className="text-amber-200 text-sm font-medium">
+        Opponent appears to have disconnected {disconnectStartRef.current ? `— auto-win in ${disconnectRemaining}s` : ""}
+      </p>
     </div>
+  ) : null;
+
+  function handleQuitGame() {
+    localStorage.removeItem("hire-knob-room-code");
+    localStorage.removeItem("hire-knob-player-slot");
+    router.push("/");
+  }
+
+  // quit confirmation modal
+  const quitModal = showQuitConfirm ? (
+    <div className="fixed inset-0 z-[60] bg-black/70 flex items-center justify-center p-4">
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+        className="bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-6 max-w-xs w-full text-center"
+      >
+        <p className="text-white font-bold text-lg mb-2">Quit game?</p>
+        <p className="text-zinc-400 text-sm mb-6">Your opponent will win by default if you leave.</p>
+        <div className="space-y-2">
+          <button onClick={handleQuitGame} className="w-full py-2.5 rounded-xl bg-rose-500 hover:bg-rose-400 text-white font-bold text-sm transition-all">
+            Yes, quit
+          </button>
+          <button onClick={() => setShowQuitConfirm(false)} className="w-full py-2.5 rounded-xl border border-[#2a2a2a] text-zinc-400 hover:text-white hover:border-zinc-600 text-sm font-medium transition-all">
+            Cancel
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  ) : null;
+
+  // quit button (shown during active phases)
+  const quitButton = (phase === "instructions" || phase === "countdown" || phase === "playing" || phase === "answered" || phase === "revealed") ? (
+    <button
+      onClick={() => setShowQuitConfirm(true)}
+      className="fixed bottom-4 right-4 z-40 px-4 py-2 rounded-xl bg-[#1a1a1a] border border-[#2a2a2a] text-zinc-500 hover:text-rose-400 hover:border-rose-800 text-xs font-medium transition-all"
+    >
+      Quit game
+    </button>
   ) : null;
 
   if (error) return <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center"><p className="text-rose-400">{error}</p></div>;
@@ -500,7 +576,7 @@ export default function GamePage() {
   if (phase === "instructions") {
     return (
       <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-4">
-        {disconnectBanner}
+        {disconnectBanner}{quitModal}{quitButton}
         <motion.div className="w-full max-w-sm bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-8" {...PAGE}>
           <h2 className="text-2xl font-black text-white mb-6">How to play</h2>
           <ul className="space-y-4 text-sm text-zinc-400 mb-8">
@@ -510,11 +586,24 @@ export default function GamePage() {
             <li className="flex gap-3"><span className="text-lime-400 font-bold">4.</span> Score a point for each correct answer</li>
           </ul>
           <button
-            onClick={() => { setCountdownValue(3); setPhase("countdown"); }}
-            className="w-full py-3 rounded-xl bg-lime-400 hover:bg-lime-300 active:scale-[0.98] text-black font-bold text-sm transition-all"
+            onClick={() => {
+              if (readyRequested) return;
+              setReadyRequested(true);
+              fetch("/api/pusher", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "request-ready", roomCode: roomId, playerId: meRef.current?.id }),
+              }).catch(() => {});
+            }}
+            disabled={readyRequested}
+            className="w-full py-3 rounded-xl bg-lime-400 hover:bg-lime-300 active:scale-[0.98] disabled:opacity-60 text-black font-bold text-sm transition-all"
           >
-            Ready!
+            {readyRequested
+              ? (opponentReady ? "Starting..." : "Waiting for opponent...")
+              : (opponentReady ? "Opponent is ready — start!" : "Ready!")}
           </button>
+          {opponentReady && !readyRequested && (
+            <p className="text-xs text-lime-400 text-center animate-pulse mt-3">Your opponent is ready!</p>
+          )}
         </motion.div>
       </div>
     );
@@ -523,7 +612,7 @@ export default function GamePage() {
   if (phase === "countdown") {
     return (
       <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-4">
-        {disconnectBanner}
+        {disconnectBanner}{quitModal}{quitButton}
         <AnimatePresence mode="wait">
           <motion.div
             key={countdownValue}
@@ -551,7 +640,7 @@ export default function GamePage() {
     const urgent = timer <= 10 && timer > 0;
     return (
       <div className={`min-h-screen bg-[#0f0f0f] p-3 sm:p-4 transition-all duration-300 ${urgent ? "ring-2 ring-inset ring-rose-500/60 animate-pulse" : ""}`}>
-        {disconnectBanner}
+        {disconnectBanner}{quitModal}{quitButton}
         <motion.div className="max-w-lg mx-auto" {...SLIDE_UP}>
           {/* header */}
           <div className="flex items-center justify-between mb-3 sm:mb-4">
@@ -662,9 +751,11 @@ export default function GamePage() {
           <div className="bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-8 mb-4">
             <p className="text-[11px] font-semibold text-zinc-500 tracking-[0.18em] uppercase mb-2">Game over</p>
             <h2 className="text-3xl font-black text-white mb-1">
-              {isDraw ? "Draw!" : iWon ? "You win!" : `${winner?.name} wins!`}
+              {disconnectWin ? "You win!" : isDraw ? "Draw!" : iWon ? "You win!" : `${winner?.name} wins!`}
             </h2>
-            <p className="text-zinc-400 text-sm mb-6">{totalRounds} rounds completed</p>
+            <p className="text-zinc-400 text-sm mb-6">
+              {disconnectWin ? "Opponent disconnected" : `${totalRounds} rounds completed`}
+            </p>
 
             <div className="space-y-3">
               {sorted.map((p, i) => (
@@ -758,7 +849,7 @@ export default function GamePage() {
 
     return (
       <div className="min-h-screen bg-[#0f0f0f] p-4">
-        {disconnectBanner}
+        {disconnectBanner}{quitModal}{quitButton}
         <div className="max-w-lg mx-auto">
           <div className="flex items-center justify-between mb-4">
             <span className="text-xs text-zinc-500">Round {round + 1}/{totalRounds}</span>
