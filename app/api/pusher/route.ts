@@ -399,27 +399,31 @@ export async function POST(request: NextRequest) {
         answerCount: result.answerCount,
         totalPlayers: result.totalPlayers,
       });
-      // Auto-reveal when all players have answered
-      if (result.answerCount >= result.totalPlayers) {
-        const scenario = scenarios[result.room.scenarioOrder[result.room.currentRound]];
-        const ci = scenario.options.findIndex((o: { isCorrect: boolean }) => o.isCorrect);
-        const updated = await groupRevealRound(roomCode, ci, scenario.id);
-        if (updated) {
-          const distribution: Record<number, number> = {};
-          for (const player of updated.players) {
-            if (player.id === updated.hostId) continue;
-            const ans = updated.answers[player.id];
-            if (ans !== undefined && ans !== null) {
-              distribution[ans] = (distribution[ans] ?? 0) + 1;
+      // Auto-reveal when all players have answered (atomic check)
+      if (result.allAnswered) {
+        // Re-load room to get all answers across instances
+        const freshRoom = await getRoom(roomCode);
+        if (freshRoom && !freshRoom.revealed) {
+          const scenario = scenarios[freshRoom.scenarioOrder[freshRoom.currentRound]];
+          const ci = scenario.options.findIndex((o: { isCorrect: boolean }) => o.isCorrect);
+          const updated = await groupRevealRound(roomCode, ci, scenario.id);
+          if (updated) {
+            const distribution: Record<number, number> = {};
+            for (const player of updated.players) {
+              if (player.id === updated.hostId) continue;
+              const ans = updated.answers[player.id];
+              if (ans !== undefined && ans !== null) {
+                distribution[ans] = (distribution[ans] ?? 0) + 1;
+              }
             }
+            await pusherServer.trigger(`game-${roomCode}`, "group-round-reveal", {
+              correctIndex: ci,
+              answers: updated.answers,
+              distribution,
+              scores: updated.scores,
+              totalPlayers: updated.players.length - 1,
+            });
           }
-          await pusherServer.trigger(`game-${roomCode}`, "group-round-reveal", {
-            correctIndex: ci,
-            answers: updated.answers,
-            distribution,
-            scores: updated.scores,
-            totalPlayers: updated.players.length - 1,
-          });
         }
       }
       return NextResponse.json({ ok: true });

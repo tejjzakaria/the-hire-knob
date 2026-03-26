@@ -126,6 +126,35 @@ export default function GroupGamePage() {
     return () => clearTimeout(t);
   }, [phase, countdownValue, startTimer]);
 
+  // --------- lobby poll: refresh player list every 3s -----------
+  useEffect(() => {
+    if (phase !== "lobby") return;
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch("/api/pusher", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get-group-room", roomCode: roomId }),
+        });
+        const data = await res.json();
+        if (data.error) return;
+        const room = data.room;
+        setPlayers(room.players ?? []);
+        setTotalPlayers(Math.max(0, (room.players?.length ?? 1) - 1));
+        // If host started the game while we were polling, the Pusher event handles it
+        if (room.status === "playing" && data.scenario) {
+          setRound(data.round ?? 0);
+          setTotalRounds(data.totalRounds ?? 5);
+          setScenario(data.scenario);
+          scenarioRef.current = data.scenario;
+          setCountdownValue(3);
+          setPhase("countdown");
+        }
+      } catch { /* ignore */ }
+    }, 3000);
+    return () => clearInterval(poll);
+  }, [phase, roomId]);
+
   // --------- Pusher + initial load -----------
   useEffect(() => {
     const playerId = localStorage.getItem("hire-knob-player-id") ?? "";

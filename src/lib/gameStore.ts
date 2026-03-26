@@ -455,16 +455,36 @@ export async function groupSubmitAnswer(
   code: string,
   playerId: string,
   answerIndex: number
-): Promise<{ room: Room; answerCount: number; totalPlayers: number } | null> {
+): Promise<{ room: Room; answerCount: number; totalPlayers: number; allAnswered: boolean } | null> {
   const room = await loadRoom(code);
   if (!room || room.mode !== "group" || room.revealed) return null;
-  if (room.answers[playerId] !== undefined) return { room, answerCount: Object.keys(room.answers).length, totalPlayers: room.players.length - 1 };
+  if (room.answers[playerId] !== undefined) {
+    const totalPlayers = room.players.length - 1;
+    return { room, answerCount: Object.keys(room.answers).length, totalPlayers, allAnswered: false };
+  }
   room.answers[playerId] = answerIndex;
   await persistRoom(room);
-  const answerCount = Object.keys(room.answers).length;
-  // players minus host
   const totalPlayers = room.players.length - 1;
-  return { room, answerCount, totalPlayers };
+  // Use atomic vote to reliably count across instances
+  const r = getRedis();
+  let answerCount: number;
+  let allAnswered = false;
+  if (r) {
+    const key = `hire-knob:group-answers:${code}:${room.currentRound}`;
+    await r.sadd(key, playerId);
+    answerCount = await r.scard(key);
+    if (answerCount >= totalPlayers) {
+      const claimed = await r.set(`${key}:lock`, "1", { nx: true, ex: 10 });
+      if (claimed) {
+        allAnswered = true;
+        await r.del(key, `${key}:lock`);
+      }
+    }
+  } else {
+    answerCount = Object.keys(room.answers).length;
+    allAnswered = answerCount >= totalPlayers;
+  }
+  return { room, answerCount, totalPlayers, allAnswered };
 }
 
 export async function groupRevealRound(
@@ -494,10 +514,13 @@ export async function groupRevealRound(
 export async function groupAdvanceRound(code: string, hostId: string): Promise<Room | null> {
   const room = await loadRoom(code);
   if (!room || room.mode !== "group" || room.hostId !== hostId) return null;
+  const prevRound = room.currentRound;
   room.currentRound++;
   room.answers = {};
   room.revealed = false;
   room.roundStartTime = Date.now();
+  // Clear atomic answer counter for previous round
+  await clearVote(`hire-knob:group-answers:${code}:${prevRound}`);
   await persistRoom(room);
   return room;
 }
