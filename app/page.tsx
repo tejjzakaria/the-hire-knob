@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import { DitheringShader } from "@/components/dithering-shader";
 
 export default function LobbyPage() {
   const router = useRouter();
@@ -89,9 +90,23 @@ export default function LobbyPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <DitheringShader
+          width={1200}
+          height={1200}
+          colorBack="#00000000"
+          colorFront="#a3e635"
+          shape="swirl"
+          type="8x8"
+          pxSize={3}
+          speed={0.4}
+          className="opacity-15"
+          style={{ width: "100%", height: "100%" }}
+        />
+      </div>
       <motion.div
-        className="w-full max-w-sm"
+        className="w-full max-w-sm relative z-10"
         initial={{ opacity: 0, y: 24 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
