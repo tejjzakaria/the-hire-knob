@@ -240,6 +240,11 @@ export default function GamePage() {
     ch.bind("player-joined", (data: { player: PlayerInfo }) => {
       setPlayers((prev) => { if (prev.find((p) => p.id === data.player.id)) return prev; return [...prev, data.player]; });
       setGuestReady(true);
+      // Player 1 triggers start-game when Player 2 joins
+      if (meRef.current?.slot === 1 && !startedGameRef.current) {
+        startedGameRef.current = true;
+        fetch("/api/pusher", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "start-game", roomCode: roomId }) }).catch(() => {});
+      }
     });
 
     ch.bind("round-start", (data: { round: number; totalRounds: number; scenario: ScenarioForClient; roundStartTime: number }) => {
@@ -471,10 +476,12 @@ export default function GamePage() {
     const winner = sorted.length >= 2 && (finalData.scores[sorted[0].id] ?? 0) > (finalData.scores[sorted[1].id] ?? 0) ? sorted[0] : null;
     const isDraw = !winner;
     const iWon = winner?.id === myId;
+    const opponent = finalData.players.find((p) => p.id !== myId);
 
     return (
-      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-4">
-        <div className="w-full max-w-sm">
+      <div className="min-h-screen bg-[#0f0f0f] p-4 pt-8">
+        <div className="w-full max-w-sm mx-auto">
+          {/* Winner card */}
           <div className="bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-8 mb-4">
             <p className="text-[11px] font-semibold text-zinc-500 tracking-[0.18em] uppercase mb-2">Game over</p>
             <h2 className="text-3xl font-black text-white mb-1">
@@ -495,12 +502,55 @@ export default function GamePage() {
             </div>
           </div>
 
-          <button
-            onClick={handlePlayAgain}
-            className="w-full py-3 rounded-xl bg-lime-400 hover:bg-lime-300 active:scale-[0.98] text-black font-bold text-sm transition-all"
-          >
-            Play again
-          </button>
+          {/* Round breakdown */}
+          {roundHistory.length > 0 && (
+            <div className="bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-5 mb-4">
+              <p className="text-[11px] font-semibold text-zinc-500 tracking-[0.18em] uppercase mb-4">Round breakdown</p>
+              <div className="space-y-3">
+                {roundHistory.map((rh) => (
+                  <div key={rh.roundIndex} className="border-b border-[#2a2a2a] last:border-0 pb-3 last:pb-0">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">Round {rh.roundIndex + 1}</span>
+                      <span className="text-xs text-zinc-400">{rh.candidateName}</span>
+                    </div>
+                    <p className="text-xs text-zinc-500 mb-2">
+                      Answer: <span className="text-lime-400 font-medium">{rh.biasLabel}</span>
+                    </p>
+                    <div className="flex items-center gap-4 text-xs">
+                      <span className={`flex items-center gap-1.5 ${rh.myCorrect ? "text-emerald-400" : "text-rose-400"}`}>
+                        <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] ${rh.myCorrect ? "bg-emerald-900" : "bg-rose-900"}`}>
+                          {rh.myCorrect ? "\u2713" : "\u2717"}
+                        </span>
+                        You
+                      </span>
+                      <span className={`flex items-center gap-1.5 ${rh.opponentCorrect ? "text-emerald-400" : "text-rose-400"}`}>
+                        <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] ${rh.opponentCorrect ? "bg-emerald-900" : "bg-rose-900"}`}>
+                          {rh.opponentCorrect ? "\u2713" : "\u2717"}
+                        </span>
+                        {opponent?.name ?? "Opponent"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Action buttons */}
+          <div className="space-y-3">
+            <button
+              onClick={handlePlayAgain}
+              className="w-full py-3 rounded-xl bg-lime-400 hover:bg-lime-300 active:scale-[0.98] text-black font-bold text-sm transition-all"
+            >
+              Play again
+            </button>
+            <button
+              onClick={() => router.push("/results")}
+              className="w-full py-3 rounded-xl border border-[#2a2a2a] text-zinc-400 hover:text-white hover:border-zinc-600 text-sm font-medium transition-all"
+            >
+              View leaderboard
+            </button>
+          </div>
         </div>
       </div>
     );

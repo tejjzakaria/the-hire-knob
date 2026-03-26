@@ -81,7 +81,7 @@ export function joinRoom(code: string, player: Player): Room | null {
 
 export function startGame(code: string): Room | null {
   const room = rooms.get(code);
-  if (!room || room.players.length < 2) return null;
+  if (!room || room.players.length < 2 || room.status !== "lobby") return null;
   room.status = "playing";
   room.currentRound = 0;
   room.answers = {};

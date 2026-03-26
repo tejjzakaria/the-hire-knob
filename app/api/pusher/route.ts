@@ -13,6 +13,8 @@ import {
 import { saveResult } from "@/src/lib/results";
 import { scenarios } from "@/src/data/scenarios";
 
+const TOTAL_ROUNDS = 5;
+
 export async function POST(request: NextRequest) {
   // --------- handle the request -----------
   try {
@@ -98,7 +100,7 @@ export async function POST(request: NextRequest) {
           options: sc.options.map((o: { label: string; isCorrect: boolean }) => ({ label: o.label })),
         };
         result.round = room.currentRound;
-        result.totalRounds = scenarios.length;
+        result.totalRounds = TOTAL_ROUNDS;
         result.roundStartTime = room.roundStartTime;
       }
       return NextResponse.json(result);
@@ -114,7 +116,7 @@ export async function POST(request: NextRequest) {
       const sc = scenarios[room.scenarioOrder[room.currentRound]];
       await pusherServer.trigger(`game-${roomCode}`, "round-start", {
         round: 0,
-        totalRounds: scenarios.length,
+        totalRounds: TOTAL_ROUNDS,
         scenario: {
           id: sc.id,
           candidateName: sc.candidateName,
@@ -185,7 +187,7 @@ export async function POST(request: NextRequest) {
       if (!room) {
         return NextResponse.json({ ok: true });
       }
-      if (room.currentRound >= scenarios.length) {
+      if (room.currentRound >= TOTAL_ROUNDS) {
         // --------- game over -----------
         const sortedScores = Object.entries(room.scores).sort(([, a], [, b]) => b - a);
         const winner =
@@ -212,7 +214,7 @@ export async function POST(request: NextRequest) {
         const sc = scenarios[room.scenarioOrder[room.currentRound]];
         await pusherServer.trigger(`game-${roomCode}`, "round-start", {
           round: room.currentRound,
-          totalRounds: scenarios.length,
+          totalRounds: TOTAL_ROUNDS,
           scenario: {
             id: sc.id,
             candidateName: sc.candidateName,
