@@ -22,6 +22,9 @@ export interface Room {
   revealed: boolean;
   roundStartTime: number;
   roundRecords: RoundRecord[];
+  rematchVotes: Set<string>;
+  skipVotes: Set<string>;
+  lastHeartbeat: Record<string, number>;
 }
 
 const rooms = new Map<string, Room>();
@@ -62,6 +65,9 @@ export function createRoom(
     revealed: false,
     roundStartTime: 0,
     roundRecords: [],
+    rematchVotes: new Set(),
+    skipVotes: new Set(),
+    lastHeartbeat: { [player.id]: Date.now() },
   };
   rooms.set(code, room);
   return room;
@@ -76,6 +82,7 @@ export function joinRoom(code: string, player: Player): Room | null {
   if (!room || room.players.length >= 2 || room.status !== "lobby") return null;
   room.players.push(player);
   room.scores[player.id] = 0;
+  room.lastHeartbeat[player.id] = Date.now();
   return room;
 }
 
@@ -87,6 +94,7 @@ export function startGame(code: string): Room | null {
   room.answers = {};
   room.revealed = false;
   room.roundStartTime = Date.now();
+  room.skipVotes = new Set();
   return room;
 }
 
@@ -131,5 +139,61 @@ export function advanceRound(code: string, fromRound: number): Room | null {
   room.answers = {};
   room.revealed = false;
   room.roundStartTime = Date.now();
+  room.skipVotes = new Set();
   return room;
+}
+
+export function requestSkip(
+  code: string,
+  playerId: string
+): { room: Room; allReady: boolean } | null {
+  const room = rooms.get(code);
+  if (!room || !room.revealed) return null;
+  room.skipVotes.add(playerId);
+  const allReady = room.players.every((p) => room.skipVotes.has(p.id));
+  return { room, allReady };
+}
+
+export function requestRematch(
+  code: string,
+  playerId: string,
+  scenarioCount: number
+): { room: Room; allReady: boolean } | null {
+  const room = rooms.get(code);
+  if (!room || room.status !== "finished") return null;
+  room.rematchVotes.add(playerId);
+  const allReady = room.players.every((p) => room.rematchVotes.has(p.id));
+  if (allReady) {
+    room.status = "playing";
+    room.currentRound = 0;
+    room.answers = {};
+    room.revealed = false;
+    room.roundStartTime = Date.now();
+    room.roundRecords = [];
+    room.rematchVotes = new Set();
+    room.skipVotes = new Set();
+    for (const player of room.players) {
+      room.scores[player.id] = 0;
+    }
+    const arr = Array.from({ length: scenarioCount }, (_, i) => i);
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    room.scenarioOrder = arr;
+  }
+  return { room, allReady };
+}
+
+export function updateHeartbeat(
+  code: string,
+  playerId: string
+): { opponentLastBeat: number | null } | null {
+  const room = rooms.get(code);
+  if (!room) return null;
+  room.lastHeartbeat[playerId] = Date.now();
+  const opponent = room.players.find((p) => p.id !== playerId);
+  return {
+    opponentLastBeat: opponent ? (room.lastHeartbeat[opponent.id] ?? null) : null,
+  };
 }

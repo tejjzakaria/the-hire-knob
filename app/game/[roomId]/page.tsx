@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { getPusherClient } from "@/src/lib/pusher";
 import type { Channel } from "pusher-js";
+import confetti from "canvas-confetti";
 
 interface OptionForClient {
   label: string;
@@ -56,6 +57,7 @@ type GamePhase =
   | "loading"
   | "waiting"
   | "instructions"
+  | "countdown"
   | "playing"
   | "answered"
   | "revealed"
@@ -146,6 +148,24 @@ function playTick() {
   osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.09);
 }
 
+function playVictory() {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const notes = [523.25, 659.25, 783.99, 1046.50];
+  notes.forEach((freq, i) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = "sine";
+    const t = ctx.currentTime + i * 0.15;
+    osc.frequency.setValueAtTime(freq, t);
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(0.18, t + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+    osc.start(t); osc.stop(t + 0.51);
+  });
+}
+
 export default function GamePage() {
   const { roomId } = useParams<{ roomId: string }>();
   const router = useRouter();
@@ -169,6 +189,12 @@ export default function GamePage() {
 
   const [timer, setTimer] = useState(60);
   const [nextRoundTimer, setNextRoundTimer] = useState(5);
+  const [countdownValue, setCountdownValue] = useState(3);
+  const [skipRequested, setSkipRequested] = useState(false);
+  const [opponentWantsSkip, setOpponentWantsSkip] = useState(false);
+  const [rematchRequested, setRematchRequested] = useState(false);
+  const [opponentWantsRematch, setOpponentWantsRematch] = useState(false);
+  const [opponentDisconnected, setOpponentDisconnected] = useState(false);
 
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timerExpiredRef = useRef(false);
@@ -179,6 +205,9 @@ export default function GamePage() {
   const selectedAnswerRef = useRef<number | null>(null);
   const startedGameRef = useRef(false);
   const channelRef = useRef<Channel | null>(null);
+  const roundStartTimeRef = useRef(0);
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const heartbeatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopTimer = useCallback(() => {
     if (timerIntervalRef.current) { clearInterval(timerIntervalRef.current); timerIntervalRef.current = null; }
@@ -268,10 +297,14 @@ export default function GamePage() {
       setTotalRounds(data.totalRounds); setScenario(data.scenario); scenarioRef.current = data.scenario;
       setSelectedAnswer(null); selectedAnswerRef.current = null;
       setOpponentAnswered(false); setRevealData(null);
-      setPhase("playing");
-      // --------- calculate timer from server start time -----------
-      const elapsed = Math.floor((Date.now() - data.roundStartTime) / 1000);
-      startTimer(Math.max(0, 60 - elapsed));
+      setSkipRequested(false); setOpponentWantsSkip(false);
+      roundStartTimeRef.current = data.roundStartTime;
+      if (data.round === 0) {
+        setPhase("instructions");
+      } else {
+        setCountdownValue(3);
+        setPhase("countdown");
+      }
     });
 
     ch.bind("answer-received", (data: { playerId: string }) => {
@@ -308,6 +341,40 @@ export default function GamePage() {
     ch.bind("game-over", (data: GameOverPayload) => {
       stopTimer(); stopNextRoundTimer(); setFinalData(data);
       setScores(data.scores); setPlayers(data.players); setPhase("finished");
+      setRematchRequested(false); setOpponentWantsRematch(false);
+      // confetti for the winner
+      const myId = meRef.current?.id;
+      if (myId) {
+        const sorted = [...data.players].sort((a, b) => (data.scores[b.id] ?? 0) - (data.scores[a.id] ?? 0));
+        const winner = sorted.length >= 2 && (data.scores[sorted[0].id] ?? 0) > (data.scores[sorted[1].id] ?? 0) ? sorted[0] : null;
+        if (winner?.id === myId) {
+          playVictory();
+          confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+          setTimeout(() => confetti({ particleCount: 50, spread: 100, origin: { y: 0.5 } }), 300);
+        }
+      }
+    });
+
+    ch.bind("skip-requested", (data: { playerId: string }) => {
+      if (meRef.current && data.playerId !== meRef.current.id) setOpponentWantsSkip(true);
+    });
+
+    ch.bind("rematch-requested", (data: { playerId: string }) => {
+      if (meRef.current && data.playerId !== meRef.current.id) setOpponentWantsRematch(true);
+    });
+
+    ch.bind("rematch-start", (data: { round: number; totalRounds: number; scenario: ScenarioForClient; roundStartTime: number; scores: Record<string, number>; players: PlayerInfo[] }) => {
+      setRound(data.round); currentRoundRef.current = data.round;
+      setTotalRounds(data.totalRounds); setScenario(data.scenario); scenarioRef.current = data.scenario;
+      setSelectedAnswer(null); selectedAnswerRef.current = null;
+      setOpponentAnswered(false); setRevealData(null); setFinalData(null);
+      setScores(data.scores); setPlayers(data.players);
+      setRoundHistory([]);
+      setRematchRequested(false); setOpponentWantsRematch(false);
+      setSkipRequested(false); setOpponentWantsSkip(false);
+      startedGameRef.current = true;
+      roundStartTimeRef.current = data.roundStartTime;
+      setPhase("instructions");
     });
 
     fetch("/api/pusher", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get-room", roomCode: roomId }) })
@@ -335,8 +402,63 @@ export default function GamePage() {
       })
       .catch(() => setError("Connection error"));
 
-    return () => { pusher.unsubscribe(`game-${roomId}`); stopTimer(); stopNextRoundTimer(); };
+    return () => {
+      pusher.unsubscribe(`game-${roomId}`);
+      stopTimer(); stopNextRoundTimer();
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+      if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+    };
   }, [roomId, router, startTimer, stopTimer, startNextRoundTimer, stopNextRoundTimer]);
+
+  // countdown effect
+  useEffect(() => {
+    if (phase !== "countdown") return;
+    playTick();
+    const interval = setInterval(() => {
+      setCountdownValue((v) => {
+        if (v <= 1) {
+          clearInterval(interval);
+          setPhase("playing");
+          const elapsed = Math.floor((Date.now() - roundStartTimeRef.current) / 1000);
+          startTimer(Math.max(0, 60 - elapsed));
+          return 0;
+        }
+        playTick();
+        return v - 1;
+      });
+    }, 1000);
+    countdownIntervalRef.current = interval;
+    return () => clearInterval(interval);
+  }, [phase, startTimer]);
+
+  // heartbeat effect
+  useEffect(() => {
+    if (phase === "loading") return;
+    const playerId = meRef.current?.id;
+    if (!playerId) return;
+    const sendHeartbeat = async () => {
+      try {
+        const res = await fetch("/api/pusher", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "heartbeat", roomCode: roomId, playerId }),
+        });
+        const data = await res.json();
+        if (data.opponentLastBeat !== null && data.opponentLastBeat !== undefined) {
+          setOpponentDisconnected(Date.now() - data.opponentLastBeat > 15000);
+        }
+      } catch { /* ignore */ }
+    };
+    sendHeartbeat();
+    heartbeatIntervalRef.current = setInterval(sendHeartbeat, 5000);
+    return () => { if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current); };
+  }, [phase, roomId]);
+
+  // disconnect banner
+  const disconnectBanner = opponentDisconnected && phase !== "loading" && phase !== "waiting" && phase !== "finished" ? (
+    <div className="fixed top-0 left-0 right-0 z-50 bg-amber-900/90 border-b border-amber-700 px-4 py-2 text-center">
+      <p className="text-amber-200 text-sm font-medium">Opponent appears to have disconnected</p>
+    </div>
+  ) : null;
 
   if (error) return <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center"><p className="text-rose-400">{error}</p></div>;
 
@@ -378,16 +500,47 @@ export default function GamePage() {
   if (phase === "instructions") {
     return (
       <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-4">
-        <div className="w-full max-w-sm bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-8">
+        {disconnectBanner}
+        <motion.div className="w-full max-w-sm bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-8" {...PAGE}>
           <h2 className="text-2xl font-black text-white mb-6">How to play</h2>
           <ul className="space-y-4 text-sm text-zinc-400 mb-8">
-            <li>Read the AI hiring decision and candidate profile</li>
-            <li>Pick the bias that best explains the AI&apos;s choice</li>
-            <li>You have 60 seconds per round</li>
-            <li>Score a point for each correct answer</li>
+            <li className="flex gap-3"><span className="text-lime-400 font-bold">1.</span> Read the AI hiring decision and candidate profile</li>
+            <li className="flex gap-3"><span className="text-lime-400 font-bold">2.</span> Pick the bias that best explains the AI&apos;s choice</li>
+            <li className="flex gap-3"><span className="text-lime-400 font-bold">3.</span> You have 60 seconds per round</li>
+            <li className="flex gap-3"><span className="text-lime-400 font-bold">4.</span> Score a point for each correct answer</li>
           </ul>
-          <p className="text-xs text-zinc-600 text-center">Starting first round…</p>
-        </div>
+          <button
+            onClick={() => { setCountdownValue(3); setPhase("countdown"); }}
+            className="w-full py-3 rounded-xl bg-lime-400 hover:bg-lime-300 active:scale-[0.98] text-black font-bold text-sm transition-all"
+          >
+            Ready!
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
+  if (phase === "countdown") {
+    return (
+      <div className="min-h-screen bg-[#0f0f0f] flex items-center justify-center p-4">
+        {disconnectBanner}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={countdownValue}
+            initial={{ scale: 0.5, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 1.5, opacity: 0 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
+            className="text-center"
+          >
+            <p className="text-[11px] font-semibold text-zinc-500 tracking-[0.18em] uppercase mb-4">
+              Round {round + 1} of {totalRounds}
+            </p>
+            <span className="text-8xl font-black text-lime-400">
+              {countdownValue}
+            </span>
+          </motion.div>
+        </AnimatePresence>
       </div>
     );
   }
@@ -398,6 +551,7 @@ export default function GamePage() {
     const urgent = timer <= 10 && timer > 0;
     return (
       <div className={`min-h-screen bg-[#0f0f0f] p-3 sm:p-4 transition-all duration-300 ${urgent ? "ring-2 ring-inset ring-rose-500/60 animate-pulse" : ""}`}>
+        {disconnectBanner}
         <motion.div className="max-w-lg mx-auto" {...SLIDE_UP}>
           {/* header */}
           <div className="flex items-center justify-between mb-3 sm:mb-4">
@@ -482,11 +636,9 @@ export default function GamePage() {
   }
 
   function handleSkipToNextRound() {
-    stopNextRoundTimer();
-    if (!nextRoundTriggeredRef.current) {
-      nextRoundTriggeredRef.current = true;
-      fetch("/api/pusher", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "next-round", roomCode: roomId, fromRound: currentRoundRef.current }) }).catch(() => {});
-    }
+    if (skipRequested) return;
+    setSkipRequested(true);
+    fetch("/api/pusher", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "request-skip", roomCode: roomId, playerId: meRef.current?.id }) }).catch(() => {});
   }
 
   function handlePlayAgain() {
@@ -564,10 +716,28 @@ export default function GamePage() {
           {/* Action buttons */}
           <div className="space-y-3">
             <button
-              onClick={handlePlayAgain}
-              className="w-full py-3 rounded-xl bg-lime-400 hover:bg-lime-300 active:scale-[0.98] text-black font-bold text-sm transition-all"
+              onClick={() => {
+                setRematchRequested(true);
+                fetch("/api/pusher", {
+                  method: "POST", headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action: "request-rematch", roomCode: roomId, playerId: meRef.current?.id }),
+                }).catch(() => {});
+              }}
+              disabled={rematchRequested}
+              className="w-full py-3 rounded-xl bg-lime-400 hover:bg-lime-300 active:scale-[0.98] disabled:opacity-60 text-black font-bold text-sm transition-all"
             >
-              Play again
+              {rematchRequested
+                ? (opponentWantsRematch ? "Starting..." : "Waiting for opponent...")
+                : (opponentWantsRematch ? "Accept rematch!" : "Rematch")}
+            </button>
+            {opponentWantsRematch && !rematchRequested && (
+              <p className="text-xs text-lime-400 text-center animate-pulse">Your opponent wants a rematch!</p>
+            )}
+            <button
+              onClick={handlePlayAgain}
+              className="w-full py-3 rounded-xl border border-[#2a2a2a] text-zinc-400 hover:text-white hover:border-zinc-600 text-sm font-medium transition-all"
+            >
+              New game
             </button>
             <button
               onClick={() => router.push("/results")}
@@ -588,6 +758,7 @@ export default function GamePage() {
 
     return (
       <div className="min-h-screen bg-[#0f0f0f] p-4">
+        {disconnectBanner}
         <div className="max-w-lg mx-auto">
           <div className="flex items-center justify-between mb-4">
             <span className="text-xs text-zinc-500">Round {round + 1}/{totalRounds}</span>
@@ -616,9 +787,12 @@ export default function GamePage() {
 
           <button
             onClick={handleSkipToNextRound}
-            className="w-full py-3 rounded-xl bg-lime-400 hover:bg-lime-300 active:scale-[0.98] text-black font-bold text-sm transition-all"
+            disabled={skipRequested}
+            className="w-full py-3 rounded-xl bg-lime-400 hover:bg-lime-300 active:scale-[0.98] disabled:opacity-60 text-black font-bold text-sm transition-all"
           >
-            Next round
+            {skipRequested
+              ? (opponentWantsSkip ? "Both ready — skipping..." : "Waiting for opponent...")
+              : (opponentWantsSkip ? "Opponent ready — skip!" : "Next round")}
           </button>
         </div>
       </div>

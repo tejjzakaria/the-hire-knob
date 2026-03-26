@@ -9,6 +9,9 @@ import {
   submitAnswer,
   revealRound,
   advanceRound,
+  requestSkip,
+  requestRematch,
+  updateHeartbeat,
 } from "@/src/lib/gameStore";
 import { saveResult } from "@/src/lib/results";
 import { scenarios } from "@/src/data/scenarios";
@@ -231,6 +234,104 @@ export async function POST(request: NextRequest) {
         });
       }
       return NextResponse.json({ ok: true });
+    }
+
+    if (action === "request-skip") {
+      const { roomCode, playerId } = body;
+      const result = requestSkip(roomCode, playerId);
+      if (!result) {
+        return NextResponse.json({ ok: true });
+      }
+      if (result.allReady) {
+        const room = advanceRound(roomCode, result.room.currentRound);
+        if (!room) {
+          return NextResponse.json({ ok: true });
+        }
+        if (room.currentRound >= TOTAL_ROUNDS) {
+          const sortedScores = Object.entries(room.scores).sort(([, a], [, b]) => b - a);
+          const winner =
+            sortedScores.length >= 2 && sortedScores[0][1] > sortedScores[1][1]
+              ? sortedScores[0][0]
+              : null;
+          await saveResult({
+            id: crypto.randomUUID(),
+            roomCode,
+            playedAt: new Date().toISOString(),
+            players: room.players,
+            scores: room.scores,
+            winner,
+            rounds: room.roundRecords,
+          });
+          await pusherServer.trigger(`game-${roomCode}`, "game-over", {
+            scores: room.scores,
+            players: room.players,
+          });
+        } else {
+          const sc = scenarios[room.scenarioOrder[room.currentRound]];
+          await pusherServer.trigger(`game-${roomCode}`, "round-start", {
+            round: room.currentRound,
+            totalRounds: TOTAL_ROUNDS,
+            scenario: {
+              id: sc.id,
+              candidateName: sc.candidateName,
+              candidateInitials: sc.candidateInitials,
+              role: sc.role,
+              aiDecision: sc.aiDecision,
+              profileFields: sc.profileFields,
+              aiRationale: sc.aiRationale,
+              difficulty: sc.difficulty,
+              explanation: sc.explanation,
+              options: sc.options.map((o: { label: string; isCorrect: boolean }) => ({ label: o.label })),
+            },
+            roundStartTime: room.roundStartTime,
+          });
+        }
+      } else {
+        await pusherServer.trigger(`game-${roomCode}`, "skip-requested", { playerId });
+      }
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === "request-rematch") {
+      const { roomCode, playerId } = body;
+      const result = requestRematch(roomCode, playerId, scenarios.length);
+      if (!result) {
+        return NextResponse.json({ error: "Cannot rematch" }, { status: 400 });
+      }
+      if (result.allReady) {
+        const sc = scenarios[result.room.scenarioOrder[0]];
+        await pusherServer.trigger(`game-${roomCode}`, "rematch-start", {
+          round: 0,
+          totalRounds: TOTAL_ROUNDS,
+          scenario: {
+            id: sc.id,
+            candidateName: sc.candidateName,
+            candidateInitials: sc.candidateInitials,
+            role: sc.role,
+            aiDecision: sc.aiDecision,
+            profileFields: sc.profileFields,
+            aiRationale: sc.aiRationale,
+            difficulty: sc.difficulty,
+            explanation: sc.explanation,
+            options: sc.options.map((o: { label: string; isCorrect: boolean }) => ({ label: o.label })),
+          },
+          roundStartTime: result.room.roundStartTime,
+          scores: result.room.scores,
+          players: result.room.players,
+        });
+      } else {
+        await pusherServer.trigger(`game-${roomCode}`, "rematch-requested", { playerId });
+      }
+      return NextResponse.json({ ok: true });
+    }
+
+    if (action === "heartbeat") {
+      const { roomCode, playerId } = body;
+      const result = updateHeartbeat(roomCode, playerId);
+      if (!result) {
+        return NextResponse.json({ error: "Room not found" }, { status: 404 });
+      }
+      return NextResponse.json({ opponentLastBeat: result.opponentLastBeat });
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
