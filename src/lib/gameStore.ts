@@ -454,6 +454,16 @@ export async function groupStartGame(code: string, hostId: string): Promise<Room
 function groupAnswerKey(code: string, round: number) {
   return `hire-knob:group-ans:${code}:${round}`;
 }
+function groupTimeKey(code: string, round: number) {
+  return `hire-knob:group-time:${code}:${round}`;
+}
+
+// Kahoot-style scoring: max 1000 pts, scales down linearly with time taken
+function calculatePoints(correctAnswer: boolean, responseTimeMs: number, timerMs: number): number {
+  if (!correctAnswer) return 0;
+  const fraction = Math.max(0, 1 - (responseTimeMs / timerMs) / 2); // 1.0 → 0.5 over full timer
+  return Math.round(1000 * fraction);
+}
 
 export async function groupSubmitAnswer(
   code: string,
@@ -464,18 +474,20 @@ export async function groupSubmitAnswer(
   if (!room || room.mode !== "group" || room.revealed) return null;
   const totalPlayers = room.players.length - 1;
   const r = getRedis();
+  const now = Date.now();
 
   if (r) {
-    // Store answer atomically in a Redis hash — no read-modify-write race
     const hashKey = groupAnswerKey(code, room.currentRound);
+    const timeKey = groupTimeKey(code, room.currentRound);
     const existing = await r.hget(hashKey, playerId);
     if (existing !== null && existing !== undefined) {
       const answerCount = await r.hlen(hashKey);
       return { room, answerCount, totalPlayers, allAnswered: false };
     }
+    // Store answer and timestamp atomically
     await r.hset(hashKey, { [playerId]: answerIndex });
+    await r.hset(timeKey, { [playerId]: now });
     const answerCount = await r.hlen(hashKey);
-    // Also update room.answers for local consistency
     room.answers[playerId] = answerIndex;
     await persistRoom(room);
     // Check if all answered (atomic lock)
@@ -516,24 +528,47 @@ export async function loadGroupAnswers(code: string, round: number): Promise<Rec
   } catch { return {}; }
 }
 
+// Load answer timestamps from Redis hash
+async function loadGroupTimes(code: string, round: number): Promise<Record<string, number>> {
+  const r = getRedis();
+  if (!r) return {};
+  try {
+    const raw = await r.hgetall(groupTimeKey(code, round));
+    if (!raw) return {};
+    const times: Record<string, number> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      times[k] = typeof v === "number" ? v : Number(v);
+    }
+    return times;
+  } catch { return {}; }
+}
+
 export async function groupRevealRound(
   code: string,
   correctIndex: number,
   scenarioId: number
-): Promise<Room | null> {
+): Promise<{ room: Room; pointsAwarded: Record<string, number> } | null> {
   const room = await loadRoom(code);
   if (!room || room.mode !== "group" || room.revealed) return null;
-  // Load answers from Redis hash (authoritative, race-free)
+  // Load answers and timestamps from Redis (authoritative, race-free)
   const hashAnswers = await loadGroupAnswers(code, room.currentRound);
   if (Object.keys(hashAnswers).length > 0) {
     room.answers = hashAnswers;
   }
+  const times = await loadGroupTimes(code, room.currentRound);
   room.revealed = true;
+  const timerMs = 60_000;
+  const pointsAwarded: Record<string, number> = {};
   for (const player of room.players) {
     if (player.id === room.hostId) continue;
-    if (room.answers[player.id] === correctIndex) {
-      room.scores[player.id] = (room.scores[player.id] ?? 0) + 1;
-    }
+    const answer = room.answers[player.id];
+    const correct = answer === correctIndex;
+    const responseTime = times[player.id]
+      ? times[player.id] - room.roundStartTime
+      : timerMs;
+    const pts = calculatePoints(correct, responseTime, timerMs);
+    pointsAwarded[player.id] = pts;
+    room.scores[player.id] = (room.scores[player.id] ?? 0) + pts;
   }
   room.roundRecords.push({
     roundIndex: room.currentRound,
@@ -542,7 +577,7 @@ export async function groupRevealRound(
     answers: { ...room.answers },
   });
   await persistRoom(room);
-  return room;
+  return { room, pointsAwarded };
 }
 
 export async function groupAdvanceRound(code: string, hostId: string): Promise<Room | null> {
@@ -556,7 +591,13 @@ export async function groupAdvanceRound(code: string, hostId: string): Promise<R
   // Clear atomic answer data for previous round
   const r = getRedis();
   if (r) {
-    try { await r.del(groupAnswerKey(code, prevRound), `${groupAnswerKey(code, prevRound)}:lock`); } catch { /* ignore */ }
+    try {
+      await r.del(
+        groupAnswerKey(code, prevRound),
+        `${groupAnswerKey(code, prevRound)}:lock`,
+        groupTimeKey(code, prevRound)
+      );
+    } catch { /* ignore */ }
   }
   await persistRoom(room);
   return room;

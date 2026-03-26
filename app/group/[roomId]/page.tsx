@@ -70,6 +70,7 @@ export default function GroupGamePage() {
   const [correctIndex, setCorrectIndex] = useState<number | null>(null);
   const [distribution, setDistribution] = useState<Record<number, number>>({});
   const [myAnswerCorrect, setMyAnswerCorrect] = useState<boolean | null>(null);
+  const [myPointsThisRound, setMyPointsThisRound] = useState(0);
 
   // --------- timer -----------
   const [timeLeft, setTimeLeft] = useState(60);
@@ -213,6 +214,7 @@ export default function GroupGamePage() {
         answers: Record<string, number | null>;
         distribution: Record<number, number>;
         scores: Record<string, number>;
+        pointsAwarded: Record<string, number>;
         totalPlayers: number;
       }) => {
         stopTimer();
@@ -220,12 +222,13 @@ export default function GroupGamePage() {
         setDistribution(data.distribution);
         setScores(data.scores);
         setTotalPlayers(data.totalPlayers);
-        // Check if my answer was correct
         const myId = meRef.current?.id;
         if (myId && data.answers[myId] !== undefined) {
           setMyAnswerCorrect(data.answers[myId] === data.correctIndex);
+          setMyPointsThisRound(data.pointsAwarded?.[myId] ?? 0);
         } else {
           setMyAnswerCorrect(null);
+          setMyPointsThisRound(0);
         }
         setPhase("revealed");
       }
@@ -637,6 +640,11 @@ export default function GroupGamePage() {
                     {scenario.options[correctIndex ?? 0]?.label}
                   </span>
                 </p>
+                {myPointsThisRound > 0 && (
+                  <p className="text-lg font-black text-lime-400 mt-2">
+                    +{myPointsThisRound} pts
+                  </p>
+                )}
               </div>
             )}
 

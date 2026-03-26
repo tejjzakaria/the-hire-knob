@@ -403,23 +403,23 @@ export async function POST(request: NextRequest) {
       if (result.allAnswered) {
         const scenario = scenarios[result.room.scenarioOrder[result.room.currentRound]];
         const ci = scenario.options.findIndex((o: { isCorrect: boolean }) => o.isCorrect);
-        // groupRevealRound reads answers from Redis hash (authoritative)
-        const updated = await groupRevealRound(roomCode, ci, scenario.id);
-        if (updated) {
+        const reveal = await groupRevealRound(roomCode, ci, scenario.id);
+        if (reveal) {
           const distribution: Record<number, number> = {};
-          for (const player of updated.players) {
-            if (player.id === updated.hostId) continue;
-            const ans = updated.answers[player.id];
+          for (const player of reveal.room.players) {
+            if (player.id === reveal.room.hostId) continue;
+            const ans = reveal.room.answers[player.id];
             if (ans !== undefined && ans !== null) {
               distribution[ans] = (distribution[ans] ?? 0) + 1;
             }
           }
           await pusherServer.trigger(`game-${roomCode}`, "group-round-reveal", {
             correctIndex: ci,
-            answers: updated.answers,
+            answers: reveal.room.answers,
             distribution,
-            scores: updated.scores,
-            totalPlayers: updated.players.length - 1,
+            scores: reveal.room.scores,
+            pointsAwarded: reveal.pointsAwarded,
+            totalPlayers: reveal.room.players.length - 1,
           });
         }
       }
@@ -434,22 +434,23 @@ export async function POST(request: NextRequest) {
       }
       const scenario = scenarios[room.scenarioOrder[room.currentRound]];
       const ci = scenario.options.findIndex((o: { isCorrect: boolean }) => o.isCorrect);
-      const updated = await groupRevealRound(roomCode, ci, scenario.id);
-      if (updated) {
+      const reveal = await groupRevealRound(roomCode, ci, scenario.id);
+      if (reveal) {
         const distribution: Record<number, number> = {};
-        for (const player of updated.players) {
-          if (player.id === updated.hostId) continue;
-          const ans = updated.answers[player.id];
+        for (const player of reveal.room.players) {
+          if (player.id === reveal.room.hostId) continue;
+          const ans = reveal.room.answers[player.id];
           if (ans !== undefined && ans !== null) {
             distribution[ans] = (distribution[ans] ?? 0) + 1;
           }
         }
         await pusherServer.trigger(`game-${roomCode}`, "group-round-reveal", {
           correctIndex: ci,
-          answers: updated.answers,
+          answers: reveal.room.answers,
           distribution,
-          scores: updated.scores,
-          totalPlayers: updated.players.length - 1,
+          scores: reveal.room.scores,
+          pointsAwarded: reveal.pointsAwarded,
+          totalPlayers: reveal.room.players.length - 1,
         });
       }
       return NextResponse.json({ ok: true });
