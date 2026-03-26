@@ -132,23 +132,22 @@ async function persistRoom(room: Room): Promise<void> {
 }
 
 async function loadRoom(code: string): Promise<Room | undefined> {
-  // check in-memory first
-  const cached = rooms.get(code);
-  if (cached) return cached;
-  // fall back to Redis
   const r = getRedis();
-  if (!r) return undefined;
-  try {
-    const raw = await r.get<string | RoomJSON>(redisKey(code));
-    if (!raw) return undefined;
-    const data: RoomJSON = typeof raw === "string" ? JSON.parse(raw) : raw;
-    const room = fromJSON(data);
-    rooms.set(code, room); // cache locally
-    return room;
-  } catch (e) {
-    console.error("[gameStore] Redis load failed:", e);
-    return undefined;
+  if (r) {
+    // Always load from Redis for cross-instance consistency
+    try {
+      const raw = await r.get<string | RoomJSON>(redisKey(code));
+      if (!raw) return rooms.get(code); // fallback if Redis key expired but memory has it
+      const data: RoomJSON = typeof raw === "string" ? JSON.parse(raw) : raw;
+      const room = fromJSON(data);
+      rooms.set(code, room); // update local cache
+      return room;
+    } catch (e) {
+      console.error("[gameStore] Redis load failed:", e);
+      // fall through to memory
+    }
   }
+  return rooms.get(code);
 }
 
 // --------- public API (all async now) -----------
