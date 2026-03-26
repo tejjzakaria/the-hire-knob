@@ -3,7 +3,7 @@ import { Redis } from "@upstash/redis";
 export interface Player {
   id: string;
   name: string;
-  slot: 1 | 2;
+  slot: number;
 }
 
 export interface RoundRecord {
@@ -17,6 +17,9 @@ export interface Room {
   code: string;
   players: Player[];
   status: "lobby" | "playing" | "finished";
+  mode: "duo" | "group";
+  hostId: string;
+  totalRounds: number;
   currentRound: number;
   scenarioOrder: number[];
   scores: Record<string, number>;
@@ -35,6 +38,9 @@ interface RoomJSON {
   code: string;
   players: Player[];
   status: "lobby" | "playing" | "finished";
+  mode: "duo" | "group";
+  hostId: string;
+  totalRounds: number;
   currentRound: number;
   scenarioOrder: number[];
   scores: Record<string, number>;
@@ -180,6 +186,9 @@ export async function createRoom(
     code,
     players: [player],
     status: "lobby",
+    mode: "duo",
+    hostId: player.id,
+    totalRounds: 5,
     currentRound: 0,
     scenarioOrder: arr,
     scores: { [player.id]: 0 },
@@ -202,7 +211,8 @@ export async function getRoom(code: string): Promise<Room | undefined> {
 
 export async function joinRoom(code: string, player: Player): Promise<Room | null> {
   const room = await loadRoom(code);
-  if (!room || room.players.length >= 2 || room.status !== "lobby") return null;
+  if (!room || room.status !== "lobby") return null;
+  if (room.mode === "duo" && room.players.length >= 2) return null;
   room.players.push(player);
   room.scores[player.id] = 0;
   room.lastHeartbeat[player.id] = Date.now();
@@ -382,4 +392,112 @@ export async function updateHeartbeat(
   return {
     opponentLastBeat: opponent ? (room.lastHeartbeat[opponent.id] ?? null) : null,
   };
+}
+
+// --------- group mode helpers -----------
+
+function buildScenarioOrder(totalRounds: number, scenarioCount: number): number[] {
+  const order: number[] = [];
+  while (order.length < totalRounds) {
+    const batch = Array.from({ length: scenarioCount }, (_, i) => i);
+    for (let i = batch.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [batch[i], batch[j]] = [batch[j], batch[i]];
+    }
+    order.push(...batch);
+  }
+  return order.slice(0, totalRounds);
+}
+
+export async function createGroupRoom(
+  code: string,
+  host: Player,
+  scenarioCount: number,
+  totalRounds: number
+): Promise<Room> {
+  const room: Room = {
+    code,
+    players: [host],
+    status: "lobby",
+    mode: "group",
+    hostId: host.id,
+    totalRounds,
+    currentRound: 0,
+    scenarioOrder: buildScenarioOrder(totalRounds, scenarioCount),
+    scores: { [host.id]: 0 },
+    answers: {},
+    revealed: false,
+    roundStartTime: 0,
+    roundRecords: [],
+    readyVotes: new Set(),
+    rematchVotes: new Set(),
+    skipVotes: new Set(),
+    lastHeartbeat: {},
+  };
+  await persistRoom(room);
+  return room;
+}
+
+export async function groupStartGame(code: string, hostId: string): Promise<Room | null> {
+  const room = await loadRoom(code);
+  if (!room || room.mode !== "group" || room.hostId !== hostId) return null;
+  if (room.status !== "lobby" || room.players.length < 2) return null;
+  room.status = "playing";
+  room.currentRound = 0;
+  room.answers = {};
+  room.revealed = false;
+  room.roundStartTime = Date.now();
+  await persistRoom(room);
+  return room;
+}
+
+export async function groupSubmitAnswer(
+  code: string,
+  playerId: string,
+  answerIndex: number
+): Promise<{ room: Room; answerCount: number; totalPlayers: number } | null> {
+  const room = await loadRoom(code);
+  if (!room || room.mode !== "group" || room.revealed) return null;
+  if (room.answers[playerId] !== undefined) return { room, answerCount: Object.keys(room.answers).length, totalPlayers: room.players.length - 1 };
+  room.answers[playerId] = answerIndex;
+  await persistRoom(room);
+  const answerCount = Object.keys(room.answers).length;
+  // players minus host
+  const totalPlayers = room.players.length - 1;
+  return { room, answerCount, totalPlayers };
+}
+
+export async function groupRevealRound(
+  code: string,
+  correctIndex: number,
+  scenarioId: number
+): Promise<Room | null> {
+  const room = await loadRoom(code);
+  if (!room || room.mode !== "group" || room.revealed) return null;
+  room.revealed = true;
+  for (const player of room.players) {
+    if (player.id === room.hostId) continue;
+    if (room.answers[player.id] === correctIndex) {
+      room.scores[player.id] = (room.scores[player.id] ?? 0) + 1;
+    }
+  }
+  room.roundRecords.push({
+    roundIndex: room.currentRound,
+    scenarioId,
+    correctIndex,
+    answers: { ...room.answers },
+  });
+  await persistRoom(room);
+  return room;
+}
+
+export async function groupAdvanceRound(code: string, hostId: string): Promise<Room | null> {
+  const room = await loadRoom(code);
+  if (!room || room.mode !== "group" || room.hostId !== hostId) return null;
+  room.currentRound++;
+  room.answers = {};
+  room.revealed = false;
+  room.roundStartTime = Date.now();
+  await persistRoom(room);
+  return room;
 }

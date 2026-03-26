@@ -9,9 +9,10 @@ export default function LobbyPage() {
   const router = useRouter();
   const [playerName, setPlayerName] = useState("");
   const [joinCode, setJoinCode] = useState("");
-  const [mode, setMode] = useState<"create" | "join">("create");
+  const [mode, setMode] = useState<"create" | "join" | "host">("create");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [groupRounds, setGroupRounds] = useState(5);
 
   useEffect(() => {
     const saved = localStorage.getItem("hire-knob-player-name");
@@ -78,13 +79,49 @@ export default function LobbyPage() {
         setLoading(false);
         return;
       }
+      const data = await res.json();
       localStorage.setItem("hire-knob-player-name", playerName.trim());
-      localStorage.setItem("hire-knob-player-slot", "2");
+      localStorage.setItem("hire-knob-player-slot", String(data.slot ?? 2));
       localStorage.setItem("hire-knob-room-code", code);
-      router.push(`/game/${code}`);
+      // Redirect based on room mode
+      if (data.room?.mode === "group") {
+        router.push(`/group/${code}`);
+      } else {
+        router.push(`/game/${code}`);
+      }
     } catch {
-      // --------- fix later -----------
       setError("Could not join room. Please try again.");
+      setLoading(false);
+    }
+  }
+
+  async function handleCreateGroupRoom() {
+    if (!playerName.trim()) return;
+    setLoading(true);
+    setError("");
+    try {
+      let playerId = localStorage.getItem("hire-knob-player-id");
+      if (!playerId) {
+        playerId = crypto.randomUUID();
+        localStorage.setItem("hire-knob-player-id", playerId);
+      }
+      const res = await fetch("/api/pusher", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "create-group-room",
+          playerId,
+          playerName: playerName.trim(),
+          totalRounds: groupRounds,
+        }),
+      });
+      const data = await res.json();
+      localStorage.setItem("hire-knob-player-name", playerName.trim());
+      localStorage.setItem("hire-knob-player-slot", "1");
+      localStorage.setItem("hire-knob-room-code", data.roomCode);
+      router.push(`/group/${data.roomCode}`);
+    } catch {
+      setError("Could not create group room. Please try again.");
       setLoading(false);
     }
   }
@@ -164,8 +201,11 @@ export default function LobbyPage() {
               value={playerName}
               onChange={(e) => setPlayerName(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter")
-                  mode === "create" ? handleCreateRoom() : handleJoinRoom();
+                if (e.key === "Enter") {
+                  if (mode === "create") handleCreateRoom();
+                  else if (mode === "join") handleJoinRoom();
+                  else handleCreateGroupRoom();
+                }
               }}
               placeholder="e.g. Alex"
               maxLength={24}
@@ -176,7 +216,7 @@ export default function LobbyPage() {
 
           {/* ------------ mode tabs ------------ */}
           <div className="relative flex rounded-xl overflow-hidden border border-[#2a2a2a] mb-4 bg-[#111]">
-            {(["create", "join"] as const).map((m) => (
+            {(["create", "join", "host"] as const).map((m) => (
               <button
                 key={m}
                 onClick={() => {
@@ -195,7 +235,7 @@ export default function LobbyPage() {
                   />
                 )}
                 <span className="relative">
-                  {m === "create" ? "Create" : "Join"}
+                  {m === "create" ? "1v1" : m === "join" ? "Join" : "Group"}
                 </span>
               </button>
             ))}
@@ -203,7 +243,7 @@ export default function LobbyPage() {
 
           {/* ------------ tab content ------------ */}
           <AnimatePresence mode="wait">
-            {mode === "create" ? (
+            {mode === "create" && (
               <motion.div
                 key="create-content"
                 initial={{ opacity: 0, x: -8 }}
@@ -225,11 +265,12 @@ export default function LobbyPage() {
                       Creating…
                     </span>
                   ) : (
-                    "Create room"
+                    "Create 1v1 room"
                   )}
                 </button>
               </motion.div>
-            ) : (
+            )}
+            {mode === "join" && (
               <motion.div
                 key="join-content"
                 initial={{ opacity: 0, x: 8 }}
@@ -279,6 +320,57 @@ export default function LobbyPage() {
                     "Join room"
                   )}
                 </button>
+              </motion.div>
+            )}
+            {mode === "host" && (
+              <motion.div
+                key="host-content"
+                initial={{ opacity: 0, x: 8 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -8 }}
+                transition={{ duration: 0.18 }}
+                className="space-y-3"
+              >
+                <div>
+                  <label className="block text-[11px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
+                    Rounds
+                  </label>
+                  <div className="flex gap-2">
+                    {[3, 5, 10, 15].map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => setGroupRounds(n)}
+                        className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all border ${
+                          groupRounds === n
+                            ? "bg-lime-400 text-black border-lime-400"
+                            : "bg-[#111] text-zinc-500 border-[#2a2a2a] hover:border-zinc-600 hover:text-zinc-300"
+                        }`}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  onClick={handleCreateGroupRoom}
+                  disabled={!playerName.trim() || loading}
+                  className="w-full py-3 rounded-xl bg-lime-400 hover:bg-lime-300 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed text-black font-bold text-sm transition-all"
+                >
+                  {loading ? (
+                    <span className="flex items-center justify-center gap-2">
+                      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                      </svg>
+                      Creating…
+                    </span>
+                  ) : (
+                    "Create group game"
+                  )}
+                </button>
+                <p className="text-[11px] text-zinc-600 text-center">
+                  You&apos;ll host — players join with your room code
+                </p>
               </motion.div>
             )}
           </AnimatePresence>
