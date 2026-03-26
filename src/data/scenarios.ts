@@ -334,4 +334,78 @@ export const scenarios: any[] = [
       "The AI fixated on the first piece of information in Rachel's education history: 'dropped out of community college.' This negative anchor skewed the entire evaluation, even though she subsequently completed a bachelor's degree with honours and built eight years of directly relevant marketing experience. The AI anchored to the initial negative signal and failed to update its assessment when presented with clear evidence of recovery, growth, and achievement. Anchoring bias can cut both ways — here it worked against the candidate, permanently colouring the AI's view based on an early setback that the candidate had long since overcome.",
     difficulty: "medium",
   },
+  {
+    id: 10,
+    candidateName: "Sofia Ramirez",
+    candidateInitials: "SR",
+    role: "Graphic Designer",
+    aiDecision: "rejected",
+    profileFields: {
+      Age: "32",
+      Education: "Community College (Associate Degree in Visual Communications) · Adobe Certified Professional (Photoshop, Illustrator) · Certified Personal Trainer",
+      Experience: "3 yrs — Junior Designer at a small print shop · 1 yr — Freelance",
+      "Skills Match": "65%",
+      Other: "Participates in park cleanup initiatives",
+    },
+    aiRationale:
+      "Candidate's portfolio review shows strong creative work, and certifications meet baseline requirements. However, the number of years in professional design roles is below the range typically associated with candidates who succeed in this position. Based on this factor, overall suitability is rated as low.",
+    options: [
+      {
+        label: "Overconfidence bias — the AI was too certain that years of experience alone predicted success, ignoring contradictory evidence",
+        isCorrect: true,
+      },
+      {
+        label: "Name bias — the candidate's name influenced the hiring decision",
+        isCorrect: false,
+      },
+      {
+        label: "Anchoring bias — the AI fixated on the first piece of data it encountered",
+        isCorrect: false,
+      },
+      {
+        label: "Anchoring bias — an early negative data point permanently coloured the evaluation",
+        isCorrect: false,
+      },
+    ],
+    explanation:
+      "The AI acknowledged the candidate's strong portfolio and certifications but placed disproportionate weight on years of experience — presented as a 'typical range' guideline rather than a hard rule. Despite the candidate's demonstrated skills, the AI expressed high confidence that the experience gap was decisive. The model overestimated the predictive power of this single factor and underestimated the value of portfolio quality and certifications. Overconfidence bias occurs when an AI system is too certain about its judgment, ignoring nuance and contradictory evidence.",
+    difficulty: "medium",
+  },
+  {
+    id: 11,
+    candidateName: "Kai Tanaka",
+    candidateInitials: "KT",
+    role: "Marine Mammal Rehabilitation Assistant",
+    aiDecision: "rejected",
+    profileFields: {
+      Age: "41",
+      Education: "High school diploma · Online courses in marine biology fundamentals (no formal degree)",
+      Experience: "5 yrs — Aquarium Visitor Services Associate (ticket sales, guest assistance) · 2 yrs — Part-time Kayak Tour Guide",
+      "Skills Match": "45%",
+      Other: "Featured in local magazine for volunteer work",
+    },
+    aiRationale:
+      "Candidate lacks formal higher education and has limited directly relevant professional experience. Overall qualification score falls below the minimum threshold for this role.",
+    options: [
+      {
+        label: "Aggregation bias — a one-size-fits-all model ignored the unique requirements of this specialised role",
+        isCorrect: true,
+      },
+      {
+        label: "Age bias — the candidate was penalised for being older",
+        isCorrect: false,
+      },
+      {
+        label: "Credentialism — the AI over-weighted formal qualifications",
+        isCorrect: false,
+      },
+      {
+        label: "Employment gap bias — the AI penalised gaps in work history",
+        isCorrect: false,
+      },
+    ],
+    explanation:
+      "The AI applied a generic scoring model that heavily weighted formal education and traditional work history while failing to recognise that the candidate's volunteer experience was directly relevant and valuable for this specialised role. Aggregation bias occurs when a one-size-fits-all model ignores the unique requirements of a specific job. Here the AI used metrics designed for standard corporate roles and missed what actually mattered for this position.",
+    difficulty: "medium",
+  },
 ];
