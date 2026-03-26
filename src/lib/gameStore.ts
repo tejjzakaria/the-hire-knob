@@ -451,6 +451,10 @@ export async function groupStartGame(code: string, hostId: string): Promise<Room
   return room;
 }
 
+function groupAnswerKey(code: string, round: number) {
+  return `hire-knob:group-ans:${code}:${round}`;
+}
+
 export async function groupSubmitAnswer(
   code: string,
   playerId: string,
@@ -458,33 +462,58 @@ export async function groupSubmitAnswer(
 ): Promise<{ room: Room; answerCount: number; totalPlayers: number; allAnswered: boolean } | null> {
   const room = await loadRoom(code);
   if (!room || room.mode !== "group" || room.revealed) return null;
+  const totalPlayers = room.players.length - 1;
+  const r = getRedis();
+
+  if (r) {
+    // Store answer atomically in a Redis hash — no read-modify-write race
+    const hashKey = groupAnswerKey(code, room.currentRound);
+    const existing = await r.hget(hashKey, playerId);
+    if (existing !== null && existing !== undefined) {
+      const answerCount = await r.hlen(hashKey);
+      return { room, answerCount, totalPlayers, allAnswered: false };
+    }
+    await r.hset(hashKey, { [playerId]: answerIndex });
+    const answerCount = await r.hlen(hashKey);
+    // Also update room.answers for local consistency
+    room.answers[playerId] = answerIndex;
+    await persistRoom(room);
+    // Check if all answered (atomic lock)
+    let allAnswered = false;
+    if (answerCount >= totalPlayers) {
+      const lockKey = `${hashKey}:lock`;
+      const claimed = await r.set(lockKey, "1", { nx: true, ex: 10 });
+      if (claimed) {
+        allAnswered = true;
+        await r.del(lockKey);
+      }
+    }
+    return { room, answerCount, totalPlayers, allAnswered };
+  }
+
+  // Fallback: no Redis
   if (room.answers[playerId] !== undefined) {
-    const totalPlayers = room.players.length - 1;
     return { room, answerCount: Object.keys(room.answers).length, totalPlayers, allAnswered: false };
   }
   room.answers[playerId] = answerIndex;
   await persistRoom(room);
-  const totalPlayers = room.players.length - 1;
-  // Use atomic vote to reliably count across instances
+  const answerCount = Object.keys(room.answers).length;
+  return { room, answerCount, totalPlayers, allAnswered: answerCount >= totalPlayers };
+}
+
+// Load all answers from Redis hash (cross-instance consistent)
+export async function loadGroupAnswers(code: string, round: number): Promise<Record<string, number>> {
   const r = getRedis();
-  let answerCount: number;
-  let allAnswered = false;
-  if (r) {
-    const key = `hire-knob:group-answers:${code}:${room.currentRound}`;
-    await r.sadd(key, playerId);
-    answerCount = await r.scard(key);
-    if (answerCount >= totalPlayers) {
-      const claimed = await r.set(`${key}:lock`, "1", { nx: true, ex: 10 });
-      if (claimed) {
-        allAnswered = true;
-        await r.del(key, `${key}:lock`);
-      }
+  if (!r) return {};
+  try {
+    const raw = await r.hgetall(groupAnswerKey(code, round));
+    if (!raw) return {};
+    const answers: Record<string, number> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      answers[k] = typeof v === "number" ? v : Number(v);
     }
-  } else {
-    answerCount = Object.keys(room.answers).length;
-    allAnswered = answerCount >= totalPlayers;
-  }
-  return { room, answerCount, totalPlayers, allAnswered };
+    return answers;
+  } catch { return {}; }
 }
 
 export async function groupRevealRound(
@@ -494,6 +523,11 @@ export async function groupRevealRound(
 ): Promise<Room | null> {
   const room = await loadRoom(code);
   if (!room || room.mode !== "group" || room.revealed) return null;
+  // Load answers from Redis hash (authoritative, race-free)
+  const hashAnswers = await loadGroupAnswers(code, room.currentRound);
+  if (Object.keys(hashAnswers).length > 0) {
+    room.answers = hashAnswers;
+  }
   room.revealed = true;
   for (const player of room.players) {
     if (player.id === room.hostId) continue;
@@ -519,8 +553,11 @@ export async function groupAdvanceRound(code: string, hostId: string): Promise<R
   room.answers = {};
   room.revealed = false;
   room.roundStartTime = Date.now();
-  // Clear atomic answer counter for previous round
-  await clearVote(`hire-knob:group-answers:${code}:${prevRound}`);
+  // Clear atomic answer data for previous round
+  const r = getRedis();
+  if (r) {
+    try { await r.del(groupAnswerKey(code, prevRound), `${groupAnswerKey(code, prevRound)}:lock`); } catch { /* ignore */ }
+  }
   await persistRoom(room);
   return room;
 }

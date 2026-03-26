@@ -649,16 +649,18 @@ export default function GroupGamePage() {
                 {scenario.options.map((opt, idx) => {
                   const count = distribution[idx] ?? 0;
                   const isCorrect = idx === correctIndex;
+                  const isMyPick = !isHost && selectedAnswer === idx;
+                  const isMyWrongPick = isMyPick && !isCorrect;
                   const pct =
                     totalPlayers > 0
                       ? Math.round((count / totalPlayers) * 100)
                       : 0;
                   return (
-                    <div key={idx}>
+                    <div key={idx} className={`rounded-lg px-2 py-1.5 -mx-2 ${isMyWrongPick ? "bg-rose-500/5 ring-1 ring-rose-500/20" : isMyPick ? "bg-lime-400/5 ring-1 ring-lime-400/20" : ""}`}>
                       <div className="flex items-center justify-between mb-1">
                         <span
                           className={`text-sm font-medium ${
-                            isCorrect ? "text-lime-400" : "text-zinc-400"
+                            isCorrect ? "text-lime-400" : isMyWrongPick ? "text-rose-400" : "text-zinc-400"
                           }`}
                         >
                           <span className="font-bold mr-1">
@@ -670,6 +672,11 @@ export default function GroupGamePage() {
                               Correct
                             </span>
                           )}
+                          {isMyWrongPick && (
+                            <span className="ml-2 text-[10px] font-bold uppercase tracking-widest text-rose-400">
+                              Your answer
+                            </span>
+                          )}
                         </span>
                         <span className="text-xs text-zinc-500 tabular-nums">
                           {count} ({pct}%)
@@ -678,7 +685,7 @@ export default function GroupGamePage() {
                       <div className="h-2.5 bg-[#111] rounded-full overflow-hidden">
                         <motion.div
                           className={`h-full rounded-full ${
-                            isCorrect ? "bg-lime-400" : "bg-zinc-700"
+                            isCorrect ? "bg-lime-400" : isMyWrongPick ? "bg-rose-400" : "bg-zinc-700"
                           }`}
                           initial={{ width: 0 }}
                           animate={{
