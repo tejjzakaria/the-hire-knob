@@ -133,6 +133,19 @@ function playWrong() {
   osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.32);
 }
 
+function playTick() {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain); gain.connect(ctx.destination);
+  osc.type = "sine";
+  osc.frequency.setValueAtTime(880, ctx.currentTime);
+  gain.gain.setValueAtTime(0.08, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+  osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.09);
+}
+
 export default function GamePage() {
   const { roomId } = useParams<{ roomId: string }>();
   const router = useRouter();
@@ -185,7 +198,9 @@ export default function GamePage() {
           }
           return 0;
         }
-        return t - 1;
+        const next = t - 1;
+        if (next <= 10 && next > 0) playTick();
+        return next;
       });
     }, 1000);
   }, [stopTimer, roomId]);
@@ -248,6 +263,7 @@ export default function GamePage() {
     });
 
     ch.bind("round-start", (data: { round: number; totalRounds: number; scenario: ScenarioForClient; roundStartTime: number }) => {
+      stopNextRoundTimer();
       setRound(data.round); currentRoundRef.current = data.round;
       setTotalRounds(data.totalRounds); setScenario(data.scenario); scenarioRef.current = data.scenario;
       setSelectedAnswer(null); selectedAnswerRef.current = null;
@@ -379,13 +395,14 @@ export default function GamePage() {
   if (phase === "playing" || phase === "answered") {
     // --------- timer colour -----------
     const timerColor = timer > 30 ? "text-lime-400" : timer > 10 ? "text-orange-400" : "text-rose-400";
+    const urgent = timer <= 10 && timer > 0;
     return (
-      <div className="min-h-screen bg-[#0f0f0f] p-3 sm:p-4">
+      <div className={`min-h-screen bg-[#0f0f0f] p-3 sm:p-4 transition-all duration-300 ${urgent ? "ring-2 ring-inset ring-rose-500/60 animate-pulse" : ""}`}>
         <motion.div className="max-w-lg mx-auto" {...SLIDE_UP}>
           {/* header */}
           <div className="flex items-center justify-between mb-3 sm:mb-4">
             <span className="text-xs text-zinc-500">Round {round + 1}/{totalRounds}</span>
-            <span className={`font-mono font-bold text-base sm:text-lg ${timerColor}`}>{timer}s</span>
+            <span className={`font-mono font-bold ${urgent ? "text-lg sm:text-xl scale-110" : "text-base sm:text-lg"} ${timerColor} transition-all`}>{timer}s</span>
           </div>
 
           {/* candidate card */}
@@ -462,6 +479,14 @@ export default function GamePage() {
         </motion.div>
       </div>
     );
+  }
+
+  function handleSkipToNextRound() {
+    stopNextRoundTimer();
+    if (!nextRoundTriggeredRef.current) {
+      nextRoundTriggeredRef.current = true;
+      fetch("/api/pusher", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "next-round", roomCode: roomId, fromRound: currentRoundRef.current }) }).catch(() => {});
+    }
   }
 
   function handlePlayAgain() {
@@ -579,7 +604,7 @@ export default function GamePage() {
             <p className="text-xs text-zinc-400">{scenario.explanation}</p>
           </div>
 
-          <div className="bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-4">
+          <div className="bg-[#1a1a1a] rounded-2xl border border-[#2a2a2a] p-4 mb-4">
             <p className="text-[11px] text-zinc-500 uppercase tracking-wider mb-3">Scores</p>
             {revealData.players.map((p) => (
               <div key={p.id} className="flex items-center justify-between py-1.5">
@@ -588,6 +613,13 @@ export default function GamePage() {
               </div>
             ))}
           </div>
+
+          <button
+            onClick={handleSkipToNextRound}
+            className="w-full py-3 rounded-xl bg-lime-400 hover:bg-lime-300 active:scale-[0.98] text-black font-bold text-sm transition-all"
+          >
+            Next round
+          </button>
         </div>
       </div>
     );
